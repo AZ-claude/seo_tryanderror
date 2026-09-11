@@ -1,0 +1,11 @@
+{
+  "searchNeed": "「example keyword」を検索する人は、まず用語の定義を知りたい",
+  "evidence": ["上位ページは冒頭で定義を明示している"],
+  "gaps": ["本文冒頭に定義がない"],
+  "selectedGap": "本文冒頭に定義がない",
+  "changeType": "intro",
+  "requestedChange": "冒頭にexample keywordの定義を1文で追加する",
+  "requiredFacts": ["example keywordの定義"],
+  "forbiddenChanges": [],
+  "sources": []
+}

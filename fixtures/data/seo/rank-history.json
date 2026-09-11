@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "date": "2026-09-01",
+      "source": "fixture",
+      "window": { "start": "2026-08-04", "end": "2026-09-01", "days": 28 },
+      "measurements": [
+        { "keyword": "example keyword", "rank": 4, "impressions": 500, "clicks": 40 },
+        { "keyword": "second keyword", "rank": 8, "impressions": 200, "clicks": 10 },
+        { "keyword": "achieved keyword", "rank": 1, "impressions": 100, "clicks": 50 }
+      ]
+    }
+  ]
+}
