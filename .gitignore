@@ -1,0 +1,9 @@
+node_modules/
+dist/
+private/
+.env
+*.pem
+*service-account*.json
+reports/
+.tmp/
+data/seo/.run.lock

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "keywords": [
+    {
+      "keyword": "example keyword",
+      "targetPath": "/example/",
+      "status": "observing",
+      "nextReviewDate": "2026-09-17",
+      "actions": [
+        {
+          "date": "2026-09-10",
+          "rankAtAction": 4.2,
+          "rankSource": "gsc",
+          "searchNeed": "誰が何を知りたいか",
+          "gap": ["不足点"],
+          "done": "実際に行った変更",
+          "changeType": "intro",
+          "sources": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "site": {
+    "baseUrl": "https://example.com",
+    "repoRoot": ".",
+    "contentRoot": "content"
+  },
+  "gsc": {
+    "property": "sc-domain:example.com",
+    "credentialsEnv": "GSC_SERVICE_ACCOUNT_JSON",
+    "defaultWindowDays": 28,
+    "reviewWindowDays": 7,
+    "finalDataLagDays": 3
+  },
+  "experiment": {
+    "cooldownDays": 7,
+    "oneKeywordPerRun": true
+  },
+  "commands": {
+    "build": "npm run build",
+    "test": "npm test"
+  },
+  "adapters": {
+    "writer": "stub",
+    "site": "fixture",
+    "search": "fixture"
+  }
+}
