@@ -1,496 +1,148 @@
 # Handoff — seo_tryanderror
 
-最終更新: 2026-09-10
+最終更新: 2026-09-18
 
-## 1. このPJの目的
+## 1. このPJの目的（更新版）
 
-このリポジトリ `seo_tryanderror` は、**AIがSEO改善を自律的に繰り返す仕組み（C）**を独立して実装するためのPJである。
+`seo_tryanderror`（C）は、**テーマまたは既存サイトを与えると、検索市場・サイト・保有データを理解し、
+Opportunityを発見し、仮説を立て、コンテンツの新規作成または改善を行い、公開後の実測結果から学習しながら
+サイトそのものを育てていく自律サイト育成エンジン**である。
 
-既存 `/kiji` をそのまま拡張するのではなく、責務を次の3つに分離する方針を採る。
+旧HANDOFF（2026-09-10版）では「SEO Rank Watchの1キーワード改善ループをそのまま模倣する」ことを目指していたが、
+本セッションでその前提を見直した。詳細は [DESIGN.md](DESIGN.md) を参照。ここでは**なぜ変えたか・何を残したか・
+最初の実運用をどう行うか**を人間向けに説明する。
 
-- **A: 作業ログの素材化** — 既存 `/kiji` が担当。ユーザーの作業ログを取得・要約・整理し、記事化可能な素材にするところまで。
-- **B: 自然な日本語生成** — 別PJ。AまたはCから与えられた素材・要件を、事実を変えず自然な日本語へ変換する。
-- **C: SEO自己改善** — この `seo_tryanderror` が担当。GSCとSERPを基に、何を作る/直すべきか判断し、改善→観察→実測→次の改善を回す。
+責務分担（A/B/Cの3分離）はそのまま維持する。
 
-運用形は2系統。
-
-```text
-A → B   = ユーザー自身の作業ログを自然な記事にする
-C → B   = SEO上必要な記事/改善を自然な記事にする
-```
-
-AとCは直接依存しない。Bは共通の文章生成部品として扱う。
+- **A: 作業ログの素材化** — 既存 `/kiji` が担当。CはAに依存しない
+- **B: 自然な日本語生成** — 別PJ（`seo_japanese`）。事実を変えず自然な日本語へ変換するだけ
+- **C: サイト育成の意思決定** — この `seo_tryanderror` が担当
 
 ---
 
-## 2. このセッションで得た結論
+## 2. なぜ設計を変えたか
 
-### 2.1 最重要の設計判断
+### 2.1 旧設計の前提が狭すぎた
 
-SEO改善ループは新規発明しない。
+旧設計は「SEO Rank Watch」という公開実装（`daichi-ikeda-170329/study-route-compendium`）の
+`measure -> 1 keyword選択 -> gap分析 -> 1箇所改善 -> 7日観察 -> 順位判定` ループをほぼそのまま模倣していた。
+これは動くものとしては優れているが、以下の前提を暗黙に置いていた。
 
-2026-09-09のX投稿で公開された `SEO Rank Watch` の考え方を、**仕様としてほぼそのまま模倣する**。
+- **主語がkeyword**: 「どのキーワードで何位か」から出発する。しかし実際にサイトを育てる際、最初にあるのは
+  「このキーワードで上位を取りたい」という意思ではなく、「このサイトにはこういう需要／データ／強みがある」
+  という発見であるべき。キーワードは発見の**結果**であって**出発点**ではない。
+- **主語がユーザー指定のkeyword前提**: ユーザーが最初にキーワードを決める運用を想定していなかったわけではないが、
+  Cが自律的に「何を試すべきか」を発見する部分が弱かった。今回のゴールでは、Cが既存サイトを自分で読んで
+  Opportunityを見つけるところまでを主機能にする。
+- **改善単位が`1 keyword`固定**: 実際には「1ページ × 1検索意図クラスタ × 1仮説」という単位のほうが、
+  複数クエリが1ページに集約される実態（GSCのquery×page行列を見れば分かる）に合う。
+- **ゴールが「1位達成」**: 順位はdiagnostic signalの一つに過ぎない。impressions/clicks/CTR/organic sessions/
+  conversion/AI検索での可視性まで含めた成果指標へ広げられる設計にしておく必要がある。
+- **Actionが「REVISE」固定**: 将来的にCREATE（新規作成）/LINK（内部リンク）/MERGE/SPLIT/RETIREまで扱える
+  必要がある。全部をv1で自動化する必要はないが、型として拡張可能にしておく。
+- **本番への自動書き込みを前提にしていた**: `SiteAdapter.apply()` が最初から書き込み系だった。しかし
+  最初の実運用対象 `rakusetsu.com` は別リポジトリ・別ホストであり、このPJからは**読むことしかできない/
+  すべきでない**。read-onlyのフェーズを明示的に切り出す必要があった。
 
-核となるループはこれ。
+### 2.2 何が変わったか（要約）
 
-```text
-測定
-↓
-1位に近いキーワードを1つ選ぶ
-↓
-検索意図と上位ページを調べる
-↓
-検索ニーズに対する不足を1つ特定
-↓
-必要最小限の改善を1つ実施
-↓
-観察状態にする
-↓
-7日以上待つ
-↓
-GSCの実測値で評価
-↓
-未達なら別の仮説で再挑戦
-```
-
-「大量に改善する」「SEO用に文字数を増やす」「同じ語を連日いじる」は行わない。
-
-### 2.2 公開実装から分かったこと
-
-X投稿とほぼ同じ構成を、公開GitHubリポジトリ `daichi-ikeda-170329/study-route-compendium` が再現している。
-
-そこでは以下が実装されている。
-
-```text
-.claude/skills/seo-rank-watch/
-  SKILL.md
-  scripts/
-    status.mjs
-    fetch_gsc_ranks.mjs
-    record_ranks.mjs
-
-data/seo/
-  watchwords.json
-  rank-history.json
-  improvement-log.json
-```
-
-重要点:
-
-- `active / observing / achieved` の3状態
-- `observing` は `nextReviewDate` まで再改善禁止
-- GSCを正とする
-- WebSearchは補助
-- `rank-history.json` は追記専用
-- 同日・同sourceの重複測定を拒否
-- 1回1キーワード
-- 対象がなければ何もしない
-- GSC未登録の有望クエリは候補表示する
-- 検索意図分析→上位1〜3件比較→gap特定を必須化
-- 改善理由と実施内容を履歴化
-- noindexや大規模構造変更は勝手に行わない
-
-この設計の特徴は、**状態管理・履歴・再実行制御は決定論的コード、意味理解と改善仮説はAI**に分けていること。
-
-これはそのまま採用する。
+- 主語を `keyword` から `Opportunity` / `Hypothesis` へ変更した
+- 改善単位を `1 keyword` から `page × search intent cluster × hypothesis` へ変更した
+- ワークフローを `measure -> select -> plan -> apply -> observe` から
+  `READ -> UNDERSTAND -> DISCOVER -> PRIORITIZE -> PROPOSE`（v1はここまで）へ変更し、
+  `apply -> PR -> test -> review -> publish` を明確に後続フェーズとして切り離した
+- Existing Site Mode（rakusetsu.com起点）とBootstrap Mode（theme起点）という2つの利用形態を定義した
+- Experiment（旧: ImprovementKeywordState + ImprovementAction）を「このサイトで何が効いたか」を
+  学習するためのExperiment Memoryとして明確に位置づけた
 
 ---
 
-## 3. ありもので出来る部分 / ここで実装すべき部分
+## 3. 何を残したか
 
-### 3.1 ありもので出来る部分
+現行実装の中で**良い部分は捨てていない**。以下はDESIGN.md上でも「ほぼそのまま再利用」と明記した。
 
-以下は独自開発しない。
+- GSC adapterの認証部分（Service Account JWT、`searchAnalytics/query`呼び出し）
+- json-storeのatomic write（temp file + rename）
+- fs-lockによる二重実行防止
+- append-onlyの強制パターン（`rank-history.json`、および新設する`opportunities.json`/`experiments.json`の`history[]`）
+- dry-runの設計（読み取りはしてよいが永続ファイル・サイトへの書き込みをしない）
+- transaction semantics（build/test失敗時にstateを進めない、失敗を成功扱いにしない）
+- `insufficient_data` を「効果なし」と混同しない判定方針
+- fixtureのみでE2Eを完結させるテスト方針
+- provider非依存のadapter構造（GSC/Search/Writer/Siteをinterfaceで切る設計）
+- 破壊的変更（noindex/canonical/URL/大規模IA変更）を自動実行しないガードレール
+- Bとのinterface契約（`NaturalWriterAdapter.transform`）は完全に無変更
 
-#### Google Search Console
-
-使用用途:
-
-- query別の平均掲載順位
-- impressions
-- clicks
-- 期間別比較
-
-Google Search Console APIを使用する。
-
-既知の実装パターン:
-
-- service account
-- `webmasters.readonly`
-- `searchAnalytics/query`
-- `dimensions: ['query']`
-- `dataState: 'final'`
-- 日次データは遅延を考慮
-
-#### Web検索
-
-使用用途:
-
-- 現在の上位1〜3ページの確認
-- 検索意図推定
-- GSC未利用時の順位概算
-- GSCで `rank:null` の補助確認
-
-Google SERPを独自スクレイパーでクロールしない。
-
-#### Git
-
-使用用途:
-
-- SEO状態ファイルの永続化
-- 改善差分の記録
-- rollback可能性
-- AI間の引継ぎ
-
-専用DBはv1では不要。
-
-#### Codex / Claude Code等のcoding agent
-
-使用用途:
-
-- 対象サイトのコード/コンテンツを読む
-- SERP調査結果をもとに改善する
-- test/buildを実行する
-- SEO状態ファイルを更新する
-- commitする
-
-v1で専用オーケストレータは作らない。
-
-### 3.2 このPJで実装する部分
-
-Cとして以下だけを実装する。
-
-1. SEO Skill本体
-2. GSC取得スクリプト
-3. 状態表示スクリプト
-4. WebSearch/manual順位記録スクリプト
-5. SEO状態JSON schema
-6. 改善選定ルール
-7. review判定ルール
-8. 対象サイトとのadapter契約
-9. B（自然日本語生成）とのadapter契約
-10. test fixture
-11. dry-run
-12. 実行レポート
+なぜ残したか: これらは「キーワード中心か機会中心か」というドメインモデルの選択とは独立した、
+**安全性と再現性のためのインフラ**だからである。ドメインが変わっても価値は変わらない。
 
 ---
 
-## 4. Cの責務
+## 4. 最初の実運用をどう行うか
 
-Cは「文章を書くPJ」ではない。
+### 4.1 対象
 
-Cの仕事は次だけ。
+`rakusetsu.com`。ただし**このセッション・このリポジトリの範囲では `rakusetsu.com` にも他repoにも一切変更を加えない**。
+実装が進んでもMilestone 1はread-onlyのみ。
 
-- GSCから現状を測る
-- 改善候補を優先順位付けする
-- 1キーワードを選ぶ
-- 検索ニーズを定義する
-- 競合との差を特定する
-- 何を変更すべきか仕様化する
-- Bに文章生成/改稿を依頼する
-- サイトに反映する
-- build/testする
-- 改善ログを残す
-- 観察期間終了後に結果を判定する
+### 4.2 最初のマイルストーン（Milestone 1）
 
-Cは自然な日本語そのものを研究しない。
+DESIGN.md §17 の Existing Site flow のとおり:
 
-Bが未完成の間は、B adapterをstub/CLI契約で用意しておく。
+1. `seo understand` — `rakusetsu.com` を読み取り専用（HTTP経由、sitemap + 浅いクロール）で読み、
+   GSCが設定されていればクエリ×ページ行列も取得し、`site-understanding.json` を作る
+2. `seo discover` — そこからOpportunity候補をAI（Skill）が構造化JSONとして生成し、CLIが検証・保存する
+3. `seo prioritize` — 優先順位付け
+4. `seo propose` — 1件のExperiment（提案）を生成し、Markdown reportを出す
 
----
+**ここまでがMilestone 1の完了条件。** PRの作成やサイトへの実適用（apply mode）は行わない。
+実装完了後、まずこのフローの「品質」——Cが自力で筋の良いOpportunityと施策案を出せるか——を人間が確認してから、
+Milestone 2（apply mode、PR作成、B接続）へ進む。
 
-## 5. A/B/Cの境界
+### 4.3 GSCアクセスについて
 
-### Aの出力
-
-Aは記事素材を作る。
-
-例:
-
-```json
-{
-  "sourceType": "work_log",
-  "facts": [],
-  "timeline": [],
-  "decisions": [],
-  "lessons": [],
-  "rawEvidence": []
-}
-```
-
-CはAに依存しない。
-
-### Bの入力
-
-Bは自然な文章への変換だけを行う。
-
-CからBへの最低限の契約:
-
-```json
-{
-  "mode": "create|revise",
-  "targetLanguage": "ja",
-  "contentType": "article",
-  "existingText": "optional",
-  "searchNeed": "string",
-  "requiredFacts": [],
-  "requiredChanges": [],
-  "forbiddenChanges": [],
-  "targetKeyword": "string"
-}
-```
-
-Bの出力:
-
-```json
-{
-  "text": "...",
-  "preservedFacts": [],
-  "warnings": []
-}
-```
-
-Bは順位・CTR・検索ボリューム・競合順位を見ない。
-
-### Cの出力
-
-Cはサイト反映可能な改善仕様と履歴を持つ。
+`rakusetsu.com` のGSCプロパティ所有権・Service Account credentialの設定はこのセッションの範囲外。
+DESIGN.md §7 (旧DESIGN §28相当) のとおり、これは「外部依存の値」としてcore実装の完了をブロックしない。
+GSC未設定でも `understand` は失敗せず、`GSC_NOT_CONFIGURED` を明示して他の処理を続行する。
 
 ---
 
-## 6. Rank Watchの状態モデル
+## 5. Bootstrap Modeとの関係
 
-### watchwords.json
-
-監視するキーワードと対象ページ。
-
-```json
-{
-  "schemaVersion": 1,
-  "site": "https://example.com",
-  "gscProperty": "sc-domain:example.com",
-  "keywords": [
-    {
-      "keyword": "example keyword",
-      "targetPath": "/example/",
-      "priority": "high"
-    }
-  ]
-}
-```
-
-### rank-history.json
-
-追記専用。
-
-```json
-{
-  "schemaVersion": 1,
-  "entries": [
-    {
-      "date": "2026-09-10",
-      "source": "gsc",
-      "window": {
-        "start": "2026-08-11",
-        "end": "2026-09-07",
-        "days": 28
-      },
-      "measurements": [
-        {
-          "keyword": "example keyword",
-          "rank": 4.2,
-          "impressions": 500,
-          "clicks": 45
-        }
-      ]
-    }
-  ]
-}
-```
-
-### improvement-log.json
-
-```json
-{
-  "schemaVersion": 1,
-  "keywords": [
-    {
-      "keyword": "example keyword",
-      "targetPath": "/example/",
-      "status": "observing",
-      "nextReviewDate": "2026-09-17",
-      "actions": [
-        {
-          "date": "2026-09-10",
-          "rankAtAction": 4.2,
-          "rankSource": "gsc",
-          "searchNeed": "誰が何を知りたいか",
-          "gap": ["不足点"],
-          "done": "実際に行った変更",
-          "changeType": "title|intro|faq|content|internal_link|data|other",
-          "sources": []
-        }
-      ]
-    }
-  ]
-}
-```
-
-status:
-
-- `active`: 改善候補
-- `observing`: 改善済み・観察中
-- `achieved`: 1位達成、監視のみ
+将来、新規サブドメイン等で「ページ0・GSCデータ0」から育てるBootstrap Modeを使う想定がある。
+DESIGN.md §18 に設計は書いたが、**V1では実装しない**。`discover` コマンドがtheme起点の入力を
+受け付けられる設計フックだけ用意しておき、実際のmarket/SERP research自動化・初期ページ自動生成は
+後続milestoneに委ねる。理由: Existing Site Modeで「Cが自力で筋の良い判断をできるか」を先に検証しないと、
+Bootstrap Modeの自動化に投資する価値があるか判断できないため。
 
 ---
 
-## 7. キーワード選定ルール
+## 6. Codex/Claude運用方針
 
-1回につき必ず1つ。
-
-優先順位:
-
-1. 2〜10位 + impressionsあり
-2. 11〜20位 + impressions多い
-3. 過去改善済みだが1位未達
-4. 高priorityのrank:null
-5. GSCで見つかった有望未登録query
-
-除外:
-
-- observing
-- achieved
-- review期限未到来
-
-候補がなければ終了。
-
-「改善するために改善対象を捏造する」ことは禁止。
-
----
-
-## 8. 改善前にAIが必ず行う分析
-
-対象を決めたら次を必須化。
-
-1. 「誰が・何を知りたくて検索しているか」を1〜2文で書く
-2. 現在のSERP上位1〜3ページを確認
-3. 対象ページと比較
-4. 検索ニーズに対する不足をgapとして特定
-5. 変更はgapを埋める最低限にする
-
-文章量を増やすこと自体を目的にしない。
-
----
-
-## 9. 改善可能な範囲
-
-自動適用してよい候補:
-
-- title
-- meta description
-- intro
-- FAQ
-- 不足セクション
-- 内部リンク
-- 実データ/一次情報の補足
-- 見出し表現
-
-自動適用禁止:
-
-- noindex変更
-- canonical変更
-- URL変更
-- 大規模IA変更
-- 大量削除
-- 全記事一括変更
-- ドメイン設定変更
-
-これらはproposalのみ。
-
----
-
-## 10. 観察と効果判定
-
-投稿仕様では改善から7日観察。
-
-ただしGSC finalデータは通常遅延するため、実装上は次の2値を分ける。
-
-- `cooldownDays = 7`
-- `reviewDataLagDays = 3`
-
-再改善禁止は7日。
-
-効果判定は「改善後の7日分のfinalデータが十分揃った時点」を推奨。
-
-v1では設定値化する。
-
-結果:
-
-- 1位 → achieved
-- 改善あり・1位未達 → active
-- 効果なし/悪化 → active + 次回は異なるchangeTypeを優先
-
-未来の順位を予測で断定しない。
-
----
-
-## 11. v1で作らないもの
-
-YAGNI。
-
-以下は作らない。
-
-- 専用Web管理画面
-- 専用DB
-- ベクトルDB
-- 複雑なmulti-agent orchestration
-- 独自SERP scraper
-- SEOスコア独自算出エンジン
-- 自動被リンク営業
-- LLM fine-tuning
-- 強化学習
-- Aとの統合
-- B本体
-
-必要になってから追加する。
-
----
-
-## 12. Codex運用方針
-
-Codexには、このリポジトリの `DESIGN.md` を正本として最後まで実装させる。
-
-途中で儀式的な承認待ちは入れない。
+実装agentには、`DESIGN.md` を正本として最後まで実装させる。途中で儀式的な承認待ちは入れない。
 
 止まってよいのは次のみ。
 
-- 本番サイトへの不可逆変更
-- secret不足
-- GSC所有権/認証のユーザー操作が必要
-- B側インターフェースが存在せず実site統合不能
+- `rakusetsu.com` や他repoへの書き込みが必要になったとき（Milestone 1では発生しないはず）
+- secret不足（GSC credential等）
+- GSC所有権・認証にユーザー操作が必要なとき
+- B側インターフェースが存在せず実運用統合が不可能なとき（Milestone 1では未使用のため通常発生しない）
 
 それ以外はfixture/stub/dry-runで進め、実装・test・commitまで完了する。
 
 ---
 
-## 13. Definition of Done
+## 7. Definition of Done（Milestone 1）
 
-C単体v1完了条件:
+DESIGN.md §19 Acceptance Criteria を正とする。要約:
 
-- fixtureだけで一周できる
-- GSC credentialなしでも明確に `not_configured` で止まれる
-- GSC adapterを実環境で差し替え可能
-- 1キーワードだけ選ばれる
-- observingを触らない
-- rank historyを上書きしない
-- review期限を正しく判定できる
-- searchNeed/gap/change planを構造化できる
-- B adapterがstubで動く
-- site adapterがfixtureで変更を適用できる
-- build/test失敗時に改善ログをobservingへ進めない
-- successful runのみ改善ログを記録
-- dry-runではファイルを書き換えない
+- fixtureだけで `understand -> discover -> prioritize -> propose` が一周できる
+- サイトへの書き込みが一切発生しない（read-onlyアダプタのみ使用）
+- GSC credentialなしでも `not_configured` を明確にして進める
+- Opportunity/Experimentの重複・cooldownを正しく扱う
+- `history[]` のappend-only性が保証される
+- dry-runでファイルを書き換えない
 - reportを生成する
 - READMEだけでセットアップと運用が分かる
 
-この状態で、B完成後にadapterを差し替えればBC運用へ進める。
+この状態を確認できてから、Milestone 2（apply mode: B接続、PR作成、REVISE実行）へ進む。
