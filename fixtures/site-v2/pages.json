@@ -1,0 +1,14 @@
+[
+  {
+    "path": "/example/",
+    "title": "Example Keyword Guide",
+    "headings": ["Example Keyword Guide", "使い方", "よくある質問"],
+    "text": "This is placeholder fixture content for the page at /example/. It intentionally lacks a clear answer to the user's search intent (a definition up front), so the discover step has a real content gap to find. It covers usage and FAQ but never states what \"example keyword\" actually means."
+  },
+  {
+    "path": "/second/",
+    "title": "Second Page",
+    "headings": ["Second Page"],
+    "text": "This is placeholder fixture content for the page at /second/, unrelated to the example keyword opportunity."
+  }
+]

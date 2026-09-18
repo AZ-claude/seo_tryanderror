@@ -1,0 +1,17 @@
+{
+  "query": "example keyword",
+  "results": [
+    {
+      "rank": 1,
+      "title": "Example Keyword: The Complete Guide",
+      "url": "https://competitor-a.example.com/example-keyword",
+      "summary": "Leads with a clear definition up front, then covers usage and a short FAQ."
+    },
+    {
+      "rank": 2,
+      "title": "Everything About Example Keyword",
+      "url": "https://competitor-b.example.com/guide",
+      "summary": "Covers background and comparisons, includes a table of concrete data."
+    }
+  ]
+}

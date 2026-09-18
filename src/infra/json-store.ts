@@ -2,12 +2,19 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { z } from 'zod';
 import {
-  improvementLogSchema,
+  experimentsFileSchema,
+  opportunitiesFileSchema,
   rankHistoryEntrySchema,
   rankHistorySchema,
-  watchwordsSchema,
+  siteUnderstandingSchema,
 } from '../core/schemas.js';
-import type { ImprovementLog, RankHistory, RankHistoryEntry, Watchwords } from '../core/types.js';
+import type {
+  Experiment,
+  Opportunity,
+  RankHistory,
+  RankHistoryEntry,
+  SiteUnderstanding,
+} from '../core/types.js';
 
 export class JsonStoreError extends Error {
   constructor(
@@ -42,6 +49,15 @@ export async function readJsonFile<T>(path: string, schema: z.ZodType<T>): Promi
   return result.data;
 }
 
+export async function readJsonFileOrDefault<T>(path: string, schema: z.ZodType<T>, fallback: T): Promise<T> {
+  try {
+    return await readJsonFile(path, schema);
+  } catch (err) {
+    if (err instanceof JsonStoreError && err.code === 'READ_FAILED') return fallback;
+    throw err;
+  }
+}
+
 /** Writes JSON atomically: write to a temp file in the same directory, then rename. */
 export async function writeJsonFileAtomic(path: string, data: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
@@ -56,26 +72,27 @@ export async function writeJsonFileAtomic(path: string, data: unknown): Promise<
   }
 }
 
-export function loadWatchwords(path: string): Promise<Watchwords> {
-  return readJsonFile(path, watchwordsSchema) as Promise<Watchwords>;
+// --- site-understanding.json (rewritten each `understand`, not append-only) ---
+
+export function loadSiteUnderstanding(path: string): Promise<SiteUnderstanding> {
+  return readJsonFile(path, siteUnderstandingSchema) as Promise<SiteUnderstanding>;
 }
+
+export function saveSiteUnderstanding(path: string, doc: SiteUnderstanding): Promise<void> {
+  return writeJsonFileAtomic(path, doc);
+}
+
+// --- rank-history.json (append-only, DESIGN.md 7.4) ---
+
+const EMPTY_RANK_HISTORY: RankHistory = { schemaVersion: 2, entries: [] };
 
 export function loadRankHistory(path: string): Promise<RankHistory> {
-  return readJsonFile(path, rankHistorySchema) as Promise<RankHistory>;
-}
-
-export function loadImprovementLog(path: string): Promise<ImprovementLog> {
-  return readJsonFile(path, improvementLogSchema) as Promise<ImprovementLog>;
-}
-
-export function saveImprovementLog(path: string, log: ImprovementLog): Promise<void> {
-  return writeJsonFileAtomic(path, log);
+  return readJsonFileOrDefault(path, rankHistorySchema, EMPTY_RANK_HISTORY) as Promise<RankHistory>;
 }
 
 /**
  * The only write API for rank-history.json. Enforces append-only semantics:
  * rejects a duplicate (date, source) pair and never mutates existing entries.
- * See DESIGN.md section 6.
  */
 export async function appendRankHistory(path: string, entry: RankHistoryEntry): Promise<RankHistory> {
   const parsedEntry = rankHistoryEntrySchema.parse(entry);
@@ -90,9 +107,41 @@ export async function appendRankHistory(path: string, entry: RankHistoryEntry): 
     );
   }
   const next: RankHistory = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     entries: [...history.entries, parsedEntry],
   };
   await writeJsonFileAtomic(path, next);
   return next;
+}
+
+// --- opportunities.json ---
+
+const EMPTY_OPPORTUNITIES: { schemaVersion: 2; opportunities: Opportunity[] } = {
+  schemaVersion: 2,
+  opportunities: [],
+};
+
+export async function loadOpportunities(path: string): Promise<Opportunity[]> {
+  const doc = await readJsonFileOrDefault(path, opportunitiesFileSchema, EMPTY_OPPORTUNITIES);
+  return doc.opportunities as Opportunity[];
+}
+
+export async function saveOpportunities(path: string, opportunities: Opportunity[]): Promise<void> {
+  await writeJsonFileAtomic(path, { schemaVersion: 2, opportunities });
+}
+
+// --- experiments.json ---
+
+const EMPTY_EXPERIMENTS: { schemaVersion: 2; experiments: Experiment[] } = {
+  schemaVersion: 2,
+  experiments: [],
+};
+
+export async function loadExperiments(path: string): Promise<Experiment[]> {
+  const doc = await readJsonFileOrDefault(path, experimentsFileSchema, EMPTY_EXPERIMENTS);
+  return doc.experiments as Experiment[];
+}
+
+export async function saveExperiments(path: string, experiments: Experiment[]): Promise<void> {
+  await writeJsonFileAtomic(path, { schemaVersion: 2, experiments });
 }

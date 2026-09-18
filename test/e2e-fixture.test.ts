@@ -1,74 +1,90 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { runSeoLoop } from '../src/core/run.js';
-import { FixtureSiteAdapter } from '../src/adapters/site.js';
-import { StubNaturalWriterAdapter } from '../src/adapters/natural-writer.js';
-import { loadSerpFromFile } from '../src/adapters/search.js';
-import { seoPlanSchema } from '../src/core/schemas.js';
-import { loadImprovementLog, readJsonFile } from '../src/infra/json-store.js';
-import { fixtureConfig, readFileUtf8, setupFixtureWorkdir } from './fixtures-helper.js';
+import { loadOpportunities, loadExperiments } from '../src/infra/json-store.js';
+import { prioritizeOpportunities } from '../src/core/prioritize.js';
+import { runDiscover } from '../src/core/workflow/discover.js';
+import { runPropose } from '../src/core/workflow/propose.js';
+import { runUnderstand } from '../src/core/workflow/understand.js';
+import {
+  buildFixtureGscAdapter,
+  buildFixtureSiteReader,
+  loadFixtureDiscoverInput,
+  loadFixtureProposeInput,
+  setupFixtureWorkdir,
+} from './fixtures-helper.js';
 
-const REPO_ROOT = process.cwd();
-
-test('fixture E2E: measure -> select A only -> plan -> write -> validate -> observe; B and C untouched', async () => {
-  const { dir, siteDir, paths } = await setupFixtureWorkdir();
+test('fixture E2E: understand -> discover -> prioritize -> propose produces a proposed Experiment and reports', async () => {
+  const { dir, paths } = await setupFixtureWorkdir();
   try {
-    // "fixture SERPを読む" / "fixture planを読む": load from checked-in fixture files, not inline literals.
-    const serp = await loadSerpFromFile(join(REPO_ROOT, 'fixtures/search/example-keyword.json'));
-    const plan = await readJsonFile(join(REPO_ROOT, 'fixtures/plan/example-keyword.json'), seoPlanSchema);
+    const siteReader = await buildFixtureSiteReader();
+    const gsc = await buildFixtureGscAdapter();
 
-    const improvementLogBefore = await loadImprovementLog(paths.improvementLog);
-    const secondKeywordBefore = improvementLogBefore.keywords.find((k) => k.keyword === 'second keyword');
-    const achievedKeywordBefore = improvementLogBefore.keywords.find((k) => k.keyword === 'achieved keyword');
-
-    const config = fixtureConfig();
-    const adapters = {
-      gsc: null,
-      search: { inspectSerp: async () => serp }, // fixture SERP loaded from file, injected directly
-      writer: new StubNaturalWriterAdapter(),
-      site: new FixtureSiteAdapter(siteDir),
-    };
-
-    const result = await runSeoLoop(config, paths, adapters, {
+    // 1. understand
+    const understandResult = await runUnderstand(paths, siteReader, gsc, {
+      baseUrl: 'https://example.com',
       today: '2026-09-10',
       dryRun: false,
-      fetchMeasurement: false,
-      planOverride: plan,
+      gscWindowDays: 28,
+      finalDataLagDays: 0,
+      gscSource: 'fixture',
     });
+    assert.equal(understandResult.siteUnderstanding.pages.length, 2);
+    assert.ok(understandResult.siteUnderstanding.gscSummary);
+    assert.match(understandResult.report, /pages read: 2/);
 
-    // report生成
-    assert.ok(result.report.length > 0);
-    assert.match(result.report, /Selected keyword/);
+    // 2. discover
+    const discoverInput = await loadFixtureDiscoverInput();
+    const discoverResult = await runDiscover(paths, discoverInput.opportunities, '2026-09-10T00:00:00.000Z', false);
+    assert.equal(discoverResult.opportunities.length, 1);
+    const opportunity = discoverResult.opportunities[0]!;
+    assert.equal(opportunity.status, 'open');
+    assert.equal(opportunity.signals.hasGscTraction, true);
+    assert.equal(opportunity.signals.contentGapConfirmed, true);
+    assert.match(discoverResult.report, /New Opportunities \(1\)/);
 
-    // Aのみ選択
-    assert.equal(result.reportData.selection?.keyword.keyword, 'example keyword');
+    // 3. prioritize
+    const experimentsBeforePropose = await loadExperiments(paths.experiments);
+    const prioritized = prioritizeOpportunities({ opportunities: discoverResult.opportunities, experiments: experimentsBeforePropose });
+    assert.equal(prioritized.ranked.length, 1);
+    assert.equal(prioritized.ranked[0]!.id, opportunity.id);
 
-    // validate pass
-    assert.equal(result.reportData.validation?.ok, true);
-    assert.equal(result.exitCode, 0);
+    // 4. propose
+    const proposeInput = await loadFixtureProposeInput();
+    const proposeResult = await runPropose(paths, {
+      opportunityId: opportunity.id,
+      input: proposeInput,
+      today: '2026-09-10',
+      now: '2026-09-10T00:00:00.000Z',
+      finalDataLagDays: 0,
+      metricsSource: 'fixture',
+      dryRun: false,
+    });
+    assert.equal(proposeResult.exitCode, 0);
+    assert.match(proposeResult.report, /propose report/);
 
-    // fixture siteに反映 (stub writerが変更)
-    const siteAfter = await readFileUtf8(`${siteDir}/example.md`);
-    assert.match(siteAfter, /example keywordの定義/);
+    const experimentsAfter = await loadExperiments(paths.experiments);
+    assert.equal(experimentsAfter.length, 1);
+    assert.equal(experimentsAfter[0]!.status, 'proposed');
+    assert.ok(experimentsAfter[0]!.before, 'before snapshot should be sufficient given fixture GSC data');
+    assert.equal(experimentsAfter[0]!.before!.metrics.impressions, 500);
 
-    const logAfter = await loadImprovementLog(paths.improvementLog);
+    const opportunitiesAfter = await loadOpportunities(paths.opportunities);
+    assert.equal(opportunitiesAfter.find((o) => o.id === opportunity.id)!.status, 'promoted');
 
-    // Aがobserving、nextReviewDateが設定、action 1件
-    const stateA = logAfter.keywords.find((k) => k.keyword === 'example keyword');
-    assert.ok(stateA);
-    assert.equal(stateA!.status, 'observing');
-    assert.equal(stateA!.nextReviewDate, '2026-09-17');
-    assert.equal(stateA!.actions.length, 1);
-
-    // B untouched
-    const stateB = logAfter.keywords.find((k) => k.keyword === 'second keyword');
-    assert.deepEqual(stateB, secondKeywordBefore);
-
-    // C untouched
-    const stateC = logAfter.keywords.find((k) => k.keyword === 'achieved keyword');
-    assert.deepEqual(stateC, achievedKeywordBefore);
+    // Active experiment guard: proposing again for the same opportunity must be rejected.
+    const secondProposeResult = await runPropose(paths, {
+      opportunityId: opportunity.id,
+      input: proposeInput,
+      today: '2026-09-11',
+      now: '2026-09-11T00:00:00.000Z',
+      finalDataLagDays: 0,
+      metricsSource: 'fixture',
+      dryRun: false,
+    });
+    assert.equal(secondProposeResult.exitCode, 1);
+    const experimentsAfterSecondAttempt = await loadExperiments(paths.experiments);
+    assert.equal(experimentsAfterSecondAttempt.length, 1, 'guard must prevent a second Experiment from being created');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

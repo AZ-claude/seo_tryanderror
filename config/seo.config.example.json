@@ -1,9 +1,11 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "site": {
     "baseUrl": "https://example.com",
-    "repoRoot": ".",
-    "contentRoot": "content"
+    "mode": "existing",
+    "reader": "http",
+    "repoRoot": null,
+    "contentRoot": null
   },
   "gsc": {
     "property": "sc-domain:example.com",
@@ -13,12 +15,11 @@
     "finalDataLagDays": 3
   },
   "experiment": {
-    "cooldownDays": 7,
-    "oneKeywordPerRun": true
+    "cooldownDays": 7
   },
   "commands": {
-    "build": "npm run build",
-    "test": "npm test"
+    "build": null,
+    "test": null
   },
   "adapters": {
     "writer": "stub",

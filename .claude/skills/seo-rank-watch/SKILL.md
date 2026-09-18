@@ -1,17 +1,27 @@
 ---
 name: seo-rank-watch
 description: >
-  SEO改善を自律的に一周実行する(measure -> review due -> select one keyword ->
-  analyze search need/SERP gap -> apply a minimal change -> observe)。
+  サイトを理解し、Opportunityを発見し、優先順位をつけ、次に試す施策を
+  Experiment(status: proposed)として提案する(understand -> discover ->
+  prioritize -> propose)。
   「SEO改善」「検索順位を上げる」「seo-rank-watch」「検索順位を見る」
-  と言われたら起動する。
+  「Opportunityを探して」と言われたら起動する。
 ---
 
 # seo-rank-watch
 
-このSkillは `seo_tryanderror`(このリポジトリのC: SEO自己改善)を動かす。
-状態管理・履歴・再実行制御は決定論的コード(`src/core/*`)が持ち、
-検索意図の理解と改善仮説だけをこのSkill(=あなた)が担当する。
+このSkillは `seo_tryanderror`(このリポジトリのC: 自律サイト育成エンジン)を
+動かす。状態管理・履歴・重複防止・遷移制御は決定論的コード(`src/core/*`)が持ち、
+サイト内容の意味理解・Opportunity発見・仮説生成だけをこのSkill(=あなた)が担当する。
+
+主語は `keyword` ではなく `Opportunity`(page × search intent × hypothesis)で
+ある。詳細な型・ルールは `DESIGN.md`(正本)を参照。
+
+**Milestone 1の範囲は `understand -> discover -> prioritize -> propose` まで。**
+サイトへの書き込み、B(自然な日本語生成)の呼び出し、PR作成、publishは行わない。
+`rakusetsu.com` を含む実サイト・実GSCへのアクセスは、ユーザーが明示的に許可した
+場合(Milestone 1B)にのみ行う。それ以外はfixtureまたは既存の
+`site-understanding.json`/`opportunities.json`/`experiments.json` に対して操作する。
 
 ## 起動条件
 
@@ -21,6 +31,7 @@ description: >
 - 検索順位を上げる
 - seo-rank-watch
 - 検索順位を見る
+- Opportunityを探して
 
 ## 手順
 
@@ -32,109 +43,134 @@ description: >
 npm run seo -- status --config config/seo.config.json
 ```
 
-`active` / `observing` / `dueForReview` / `achieved` を確認する。
+`openOpportunities` / `proposedExperiments` / `observing` / `dueForReview` /
+`concludedRecently` を確認する。
 
-### 2. rank fetch
-
-```bash
-npm run seo -- fetch-ranks --config config/seo.config.json --append
-```
-
-- exit 0: 成功。続行。
-- exit 2 (`GSC_NOT_CONFIGURED`): GSC未設定。ユーザーに認証情報の設定を依頼し、
-  それ以外の手順(due review・report生成など既存データでできる範囲)は続けてよい。
-- exit 1: 取得失敗、または計測可能な登録keywordなし。既存rank-historyのまま続行。
-
-### 3. due review
-
-`npm run seo -- run ...`(手順7)が内部で自動的に処理する。個別コマンドは不要。
-
-### 4. 1 keyword selection
-
-`run` コマンドが `active` から最大1件を選ぶ(バケット優先順位はDESIGN.md参照)。
-候補がなければ「何もしない」が正しい結果である。捏造しない。
-
-### 5. WebSearchで上位1〜3件確認
-
-選ばれたkeywordについて、あなた自身がWebSearchを実行し、上位1〜3件の
-タイトル・URL・要約を集めて次の形式のJSONファイルに保存する
-(`SerpInspection`、詳細は `src/core/types.ts`)。
-
-```json
-{
-  "keyword": "...",
-  "results": [
-    { "rank": 1, "title": "...", "url": "...", "summary": "..." }
-  ]
-}
-```
-
-独自クローラーやスクレイピングは行わない。あなた自身の検索結果の要約のみを使う。
-
-### 6. plan JSON生成
-
-対象ページを読み、次を必ず言語化してから `SeoPlan` JSON(`src/core/types.ts`)を作る。
-
-1. 「誰が・何を知りたくて検索しているか」を1〜2文(`searchNeed`)
-2. 上位ページとの比較で見つかった不足点(`gaps`、1件以上)
-3. 今回埋める不足点1つ(`selectedGap`、`gaps` に含まれること)
-4. 変更種別(`changeType`)と具体的な変更内容(`requestedChange`)
-5. 変更に必要な事実(`requiredFacts`)と、変更してはいけない事(`forbiddenChanges`)
-
-直前の改善が `no_effect` / `worse` だった場合、同じ `changeType` を
-第一候補にしない(理由があれば例外可、その理由を記録する)。
-
-文章量を増やすこと自体を目的にしない。
-
-### 7. main runへplan/serpを渡す
+### 2. understand
 
 ```bash
-npm run seo -- run \
-  --config config/seo.config.json \
-  --serp-file /path/to/serp.json \
-  --plan-file /path/to/plan.json
+npm run seo -- understand --config config/seo.config.json
 ```
 
-### 8. validation
+サイトを読み取り専用で読み、GSC設定があればクエリ×ページ行列も取得する。
+GSC未設定でも失敗しない(`GSC_NOT_CONFIGURED` として続行)。
 
-`run` コマンドが `commands.build` / `commands.test` を実行し、
-失敗時は自動的にロールバックする(改善ログも進めない)。追加操作は不要。
+ページ本文を読んでテーマ・独自データを言語化する部分(`themes`/
+`proprietaryDataNotes`)はあなた自身が行い、`--understanding-file <json>` で
+下書きを渡してよい(`{ "themes": [...], "proprietaryDataNotes": [...] }`)。
 
-### 9. report
+### 3. discover
 
-`run` コマンドが `reports/YYYY-MM-DD-HHMMSS.md` を生成する。内容をユーザーに要約する。
+まず材料を確認する(任意、書き込みなし)。
 
-### 10. commit
-
-`run` が成功した(exit 0 かつ実際に変更を適用した)場合のみ、通常のgit操作でcommitする。
-
-```text
-seo: improve <keyword>
+```bash
+npm run seo -- discover --config config/seo.config.json --dump-inputs
 ```
 
-含めるもの: サイト/コンテンツ変更、`improvement-log.json`、
-(同runで計測した場合)`rank-history.json`。secretは絶対に含めない。
+`site-understanding.json` の内容(ページのexcerpt/headings、GSCクエリ×ページ)と、
+既存Opportunityの `identity` 一覧(scopeKey/intentKey/kind/title)が出力される。
+既存の需要を再発見した場合は、同じ `kind`+`intentSlug` を選ぶこと
+(自由文のtitleの言い換えでintentSlugを作らない)。
+
+その上でOpportunity候補を構造化JSONとして作り(`DiscoverOpportunityInput[]`、
+`src/core/types.ts` 参照)、渡す。
+
+```bash
+npm run seo -- discover --config config/seo.config.json \
+  --opportunities-file /path/to/opportunities.json
+```
+
+各候補は次を必ず持つ。
+
+1. `scope`(`page`/`cluster`/`site`)と `kind`(統制語彙)
+2. `intentSlug`(kebab-case、titleの単純な言い換えにしない)
+3. `title`/`description`(人間可読の要約)
+4. `evidence[]`(`gsc_query`/`gsc_page`/`serp`/`existing_page`/
+   `proprietary_data`/`manual` のいずれか、根拠つき)
+
+同一 `identity`(scopeKey+intentKey)は自動的に重複排除される(evidence追記の
+み)。`rejected` なOpportunityを復活させたい場合のみ `reopen: true` +
+`reopenReason` を付ける。理由の無いreopenは無視される。
+
+独自クローラーやスクレイピングは行わない。SERP根拠が必要な場合は、あなた自身が
+WebSearchを実行した要約を `evidence` に含めるか、`--serp-file` を後段の
+`propose` に渡す。
+
+### 4. prioritize
+
+```bash
+npm run seo -- prioritize --config config/seo.config.json
+```
+
+固定のbucket順位(DESIGN.md §10.4)で並んだOpportunity一覧が出る。状態は
+変更しない。GSC順位(position)には依存しない。上位1件を次のproposeに使う。
+
+候補が無ければ「何もしない」が正しい結果である。捏造しない。
+
+### 5. propose
+
+選んだOpportunityについて、必ず次を言語化してから
+`ProposeInput`(`src/core/types.ts`)JSONを作る。
+
+1. `hypothesis.statement`: 「こう変えれば良くなるはず」を1〜2文
+2. `hypothesis.expectedSignals`: 支持されたと判断する指標
+3. `action`: 変更の種類(`type`)・対象パス・内容(`summary`)・
+   必須事実(`requiredFacts`)・禁止変更(`forbiddenChanges`)
+4. `measurementPlan`: `targetPages`/`targetQueries`・`primaryMetric`・
+   `baselineWindowDays`/`reviewWindowDays`・`minimumImpressions`
+
+```bash
+npm run seo -- propose --config config/seo.config.json \
+  --opportunity-id <id> \
+  --hypothesis-file /path/to/hypothesis.json \
+  --serp-file /path/to/serp.json
+```
+
+同一Opportunityに既にアクティブな(`proposed`/`approved`/`applied`/
+`observing`)Experimentがある場合、Active Experiment Guardにより拒否される
+(exit code 1)。これは正しい挙動であり、回避策を探さない。
+
+### 6. report
+
+`understand`/`discover`/`propose` はそれぞれ `reports/YYYY-MM-DD-HHMMSS.md`
+を生成する。内容をユーザーに要約する。「順位改善を予測断定しない」原則を守る
+(観測結果のみ報告する)。
+
+### 7. commit
+
+このリポジトリの変更(`data/seo/*.json` 等)をcommitする場合は、通常のgit操作で
+行う。含めるもの: `site-understanding.json` / `opportunities.json` /
+`experiments.json` / `rank-history.json`(更新があった場合)。secretは絶対に
+含めない。**Milestone 1ではサイト側の変更は発生しないため、対象サイトの
+リポジトリへコミットすることはない。**
 
 ## Guardrails
 
-- 1 runで新規改善は1 keywordのみ
-- `observing` は `nextReviewDate` 前に触らない
-- `achieved` は監視のみ
-- `rank-history.json` は追記専用(過去entryの更新・削除は禁止)
-- GSC未登録の生クエリを永続化しない(reportの提案としてのみ表示)
+- `propose` は常に指定した1件のOpportunityのみを対象とする
+- Active Experiment Guard: 同一Opportunityに未終結のExperimentがある間、
+  新規Experiment作成を試みない
+- Opportunityのdedupeは `identity`(scopeKey+intentKey)単位。titleの言い換えで
+  重複を作らない
+- `rejected` は理由付きの明示的reopenなしに自動では触らない
+- `rank-history.json`/`opportunities.json`/`experiments.json` の `history[]`
+  は追記専用(過去entryの書き換え・削除は禁止)
+- GSCの生クエリ×ページ行列・ページ全文を無制限に永続化しない
 - secretをログ・commitに含めない
 - 独自Google SERPスクレイパーは作らない
-- noindex / canonical / URL の自動変更は禁止
-- 大規模構造変更・複数記事一括SEO rewriteは禁止
+- noindex / canonical / URL の自動変更、大規模構造変更、複数記事一括rewriteは
+  提案として出すことはあっても実行しない(実行器が無い)
 - 改善効果を予測で断定しない(観測結果のみ報告する)
 - 候補がなければ何もしない
-- build/test失敗時はexperiment開始扱いにしない
+- サイトへの書き込み・B呼び出し・PR作成・publishはMilestone 1では行わない
 
 ## 止まってよい場面
 
-- 本番サイトへの不可逆変更が必要なとき
+- 本番サイト・他repoへの書き込みが必要に見えたとき(Milestone 1では発生しない
+  はず。発生したら設計解釈が誤っている可能性が高いので止まる)
 - secretが不足しているとき
 - GSCの所有権・認証にユーザー操作が必要なとき
-- B(自然な日本語生成)側インターフェースが存在せず実site統合が不可能なとき
+- `rakusetsu.com` など実サイトへのアクセスが必要で、かつユーザーからMilestone 1B
+  の明示的な許可を得ていないとき
 
-それ以外は、fixture/stub/dry-runで前進し、実装・テスト・commitまで完了させる。
+それ以外は、fixture/既存データ/dry-runで前進し、実装・テスト・commitまで
+完了させる。

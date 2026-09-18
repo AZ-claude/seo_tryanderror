@@ -1,0 +1,31 @@
+{
+  "opportunities": [
+    {
+      "scope": { "type": "page", "path": "/example/" },
+      "kind": "content_gap",
+      "intentSlug": "missing-upfront-definition",
+      "title": "「example keyword」を検索する人は冒頭で定義を知りたいが、ページに定義がない",
+      "description": "GSCで実際に反応があるページだが、上位ページと比較すると冒頭に用語の定義がない。",
+      "evidence": [
+        {
+          "source": "gsc_query",
+          "summary": "「example keyword」で500 impressions, position 4.2の反応がある",
+          "ref": "example keyword",
+          "collectedAt": "2026-09-10T00:00:00.000Z"
+        },
+        {
+          "source": "serp",
+          "summary": "上位ページはいずれも冒頭でexample keywordを定義している",
+          "ref": "https://competitor-a.example.com/example-keyword",
+          "collectedAt": "2026-09-10T00:00:00.000Z"
+        },
+        {
+          "source": "existing_page",
+          "summary": "/example/ の本文には定義がなく、使い方とFAQのみ",
+          "ref": "/example/",
+          "collectedAt": "2026-09-10T00:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

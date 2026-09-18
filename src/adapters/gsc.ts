@@ -1,11 +1,8 @@
 import { createSign } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import type {
-  GscAdapter,
-  KeywordRecord,
-  RankMeasurement,
-  UnregisteredQuery,
-} from '../core/types.js';
+import type { GscAdapter, GscSummaryRow } from '../core/types.js';
+
+export { normalizeQuery } from '../core/text.js';
 
 export class GscError extends Error {
   constructor(
@@ -15,11 +12,6 @@ export class GscError extends Error {
     super(message);
     this.name = 'GscError';
   }
-}
-
-/** NFKC, lowercase, whitespace-stripped — used to match GSC query strings against watchwords. */
-export function normalizeQuery(q: string): string {
-  return q.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
 }
 
 type ServiceAccount = {
@@ -87,54 +79,32 @@ async function getAccessToken(account: ServiceAccount): Promise<string> {
   return data.access_token;
 }
 
-export type GscRow = { keys: string[]; clicks: number; impressions: number; position: number };
+export type RawGscRow = { keys: string[]; clicks: number; impressions: number; ctr: number; position: number };
 
 /**
- * Pure mapping from raw GSC rows to watchword measurements + unregistered
- * query suggestions. Kept separate from the network call so it is testable
- * without credentials. See DESIGN.md section 8.
+ * Pure mapping from raw GSC (query, page) rows to the query x page matrix
+ * (DESIGN.md 9.2). No watchword matching: every row is kept, filtering into
+ * a bounded top-N happens downstream in `selectTopQueries`.
  */
-export function buildMeasurements(input: {
-  rows: GscRow[];
-  watchwords: KeywordRecord[];
-}): { measurements: RankMeasurement[]; unregisteredQueries: UnregisteredQuery[] } {
-  const byNormalized = new Map(input.watchwords.map((w) => [normalizeQuery(w.keyword), w]));
-  const measurements: RankMeasurement[] = [];
-  const unregistered: UnregisteredQuery[] = [];
-
-  for (const row of input.rows) {
-    const queryText = row.keys[0] ?? '';
-    const watchword = byNormalized.get(normalizeQuery(queryText));
-    if (watchword) {
-      measurements.push({
-        keyword: watchword.keyword,
-        rank: row.position,
-        impressions: row.impressions,
-        clicks: row.clicks,
-      });
-    } else if (row.impressions >= 10) {
-      unregistered.push({
-        query: queryText,
-        rank: row.position,
-        impressions: row.impressions,
-        clicks: row.clicks,
-      });
-    }
-  }
-
-  unregistered.sort((a, b) => b.impressions - a.impressions);
-  return { measurements, unregisteredQueries: unregistered.slice(0, 20) };
+export function mapQueryPageRows(rows: RawGscRow[]): GscSummaryRow[] {
+  return rows.map((row) => ({
+    query: row.keys[0] ?? '',
+    page: row.keys[1] ?? null,
+    clicks: row.clicks,
+    impressions: row.impressions,
+    ctr: row.ctr,
+    position: row.position,
+  }));
 }
 
 export class RealGscAdapter implements GscAdapter {
   constructor(private readonly credentialsEnv: string) {}
 
-  async fetchRankWindow(input: {
+  async fetchQueryPageMatrix(input: {
     property: string;
     startDate: string;
     endDate: string;
-    watchwords: KeywordRecord[];
-  }): ReturnType<GscAdapter['fetchRankWindow']> {
+  }): ReturnType<GscAdapter['fetchQueryPageMatrix']> {
     const account = await loadServiceAccount(this.credentialsEnv);
     const accessToken = await getAccessToken(account);
 
@@ -150,7 +120,7 @@ export class RealGscAdapter implements GscAdapter {
       body: JSON.stringify({
         startDate: input.startDate,
         endDate: input.endDate,
-        dimensions: ['query'],
+        dimensions: ['query', 'page'],
         rowLimit: 5000,
         dataState: 'final',
       }),
@@ -158,7 +128,7 @@ export class RealGscAdapter implements GscAdapter {
     if (!res.ok) {
       throw new GscError(`searchAnalytics/query failed: ${res.status} ${await res.text()}`, 'GSC_FETCH_FAILED');
     }
-    const data = (await res.json()) as { rows?: GscRow[] };
-    return buildMeasurements({ rows: data.rows ?? [], watchwords: input.watchwords });
+    const data = (await res.json()) as { rows?: RawGscRow[] };
+    return { rows: mapQueryPageRows(data.rows ?? []) };
   }
 }

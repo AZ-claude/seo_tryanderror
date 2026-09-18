@@ -1,0 +1,5 @@
+[
+  { "query": "example keyword", "page": "/example/", "clicks": 40, "impressions": 500, "ctr": 0.08, "position": 4.2 },
+  { "query": "example keyword definition", "page": "/example/", "clicks": 5, "impressions": 60, "ctr": 0.083, "position": 9.1 },
+  { "query": "second page topic", "page": "/second/", "clicks": 2, "impressions": 15, "ctr": 0.133, "position": 12.0 }
+]

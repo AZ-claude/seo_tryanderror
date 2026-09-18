@@ -1,130 +1,276 @@
-// Domain types for C (SEO self-improvement loop).
-// See DESIGN.md sections 4-15 for the specification these mirror.
+// Domain types for C (opportunity-driven autonomous site growth engine).
+// See DESIGN.md sections 6-9 for the specification these mirror.
 
-export type Priority = 'high' | 'medium' | 'low';
+export type SiteMaturity = 'bootstrap' | 'exploring' | 'growing' | 'optimizing';
 
-export type KeywordRecord = {
-  keyword: string;
-  targetPath: string;
-  priority: Priority;
+// --- Opportunity (DESIGN.md 6.1) ---
+
+export type OpportunityScope =
+  | { type: 'page'; path: string }
+  | { type: 'cluster'; representativeQueries: string[] }
+  | { type: 'site' };
+
+export type OpportunityKind =
+  | 'ctr_title'
+  | 'content_gap'
+  | 'proprietary_data'
+  | 'intent_mismatch'
+  | 'other';
+
+export type OpportunityIdentity = {
+  scopeKey: string;
+  intentKey: string;
 };
 
-export type Watchwords = {
-  schemaVersion: 1;
-  site: string;
-  gscProperty: string;
-  keywords: KeywordRecord[];
+export type OpportunityStatus = 'open' | 'promoted' | 'rejected' | 'stale';
+
+export type OpportunityEventType =
+  | 'discovered'
+  | 'promoted'
+  | 'released'
+  | 'rejected'
+  | 'reopened'
+  | 'note';
+
+export type OpportunityEvent = {
+  at: string;
+  type: OpportunityEventType;
+  note?: string;
+  relatedExperimentId?: string;
 };
+
+export type OpportunitySignals = {
+  hasGscTraction: boolean;
+  contentGapConfirmed: boolean;
+  leveragesProprietaryData: boolean;
+};
+
+export type Opportunity = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  scope: OpportunityScope;
+  identity: OpportunityIdentity;
+  kind: OpportunityKind;
+  title: string;
+  description: string;
+  evidence: Evidence[];
+  signals: OpportunitySignals;
+  status: OpportunityStatus;
+  history: OpportunityEvent[];
+};
+
+// --- Evidence (DESIGN.md 6.2) ---
+
+export type EvidenceSource =
+  | 'gsc_query'
+  | 'gsc_page'
+  | 'serp'
+  | 'existing_page'
+  | 'proprietary_data'
+  | 'ga4'
+  | 'manual';
+
+export type Evidence = {
+  source: EvidenceSource;
+  summary: string;
+  ref?: string;
+  collectedAt: string;
+};
+
+// --- Hypothesis (DESIGN.md 6.3) ---
+
+export type MetricKey =
+  | 'impressions'
+  | 'clicks'
+  | 'ctr'
+  | 'position'
+  | 'organic_sessions'
+  | 'qualified_sessions'
+  | 'conversions'
+  | 'revenue';
+
+export type Hypothesis = {
+  id: string;
+  opportunityId: string;
+  createdAt: string;
+  statement: string;
+  expectedSignals: MetricKey[];
+  rationale: string;
+};
+
+// --- Action (DESIGN.md 6.4) ---
+
+export type ActionType = 'CREATE' | 'REVISE' | 'LINK' | 'MERGE' | 'SPLIT' | 'RETIRE';
+
+export type Action = {
+  type: ActionType;
+  targetPaths: string[];
+  summary: string;
+  requiredFacts: string[];
+  forbiddenChanges: string[];
+};
+
+// --- Experiment / MeasurementPlan (DESIGN.md 6.5) ---
+
+export type MeasurementPlan = {
+  targetPages: string[];
+  targetQueries?: string[];
+  primaryMetric: MetricKey;
+  secondaryMetrics: MetricKey[];
+  baselineWindowDays: number;
+  reviewWindowDays: number;
+  minimumImpressions?: number;
+};
+
+export type ExperimentStatus =
+  | 'proposed'
+  | 'approved'
+  | 'applied'
+  | 'observing'
+  | 'concluded'
+  | 'rejected';
+
+export type MetricsSnapshotSource = 'gsc' | 'ga4' | 'websearch' | 'manual' | 'fixture';
+
+export type MetricsSnapshot = {
+  at: string;
+  source: MetricsSnapshotSource;
+  window: { start: string; end: string; days: number };
+  scope: { targetPages: string[]; targetQueries?: string[] };
+  metrics: Partial<Record<MetricKey, number>>;
+  sufficientData: boolean;
+};
+
+export type ReviewOutcome =
+  | 'hypothesis_supported'
+  | 'partially_supported'
+  | 'no_effect'
+  | 'worse'
+  | 'insufficient_data';
+
+export type ExperimentEventType = ExperimentStatus | 'applied_rolled_back';
+
+export type ExperimentEvent = {
+  at: string;
+  type: ExperimentEventType;
+  note?: string;
+};
+
+export type Experiment = {
+  id: string;
+  opportunityId: string;
+  hypothesisId: string;
+  action: Action;
+  measurementPlan: MeasurementPlan;
+  status: ExperimentStatus;
+  before: MetricsSnapshot | null;
+  after?: MetricsSnapshot;
+  observation?: { start: string; end: string; nextReviewDate: string };
+  result?: { outcome: ReviewOutcome; notes: string };
+  learning?: string;
+  createdAt: string;
+  updatedAt: string;
+  history: ExperimentEvent[];
+};
+
+/** Active (non-terminal) experiment statuses, per DESIGN.md 7.3 / 12 (active experiment guard). */
+export const ACTIVE_EXPERIMENT_STATUSES: ExperimentStatus[] = [
+  'proposed',
+  'approved',
+  'applied',
+  'observing',
+];
+
+// --- Learning (DESIGN.md 6.6) ---
+
+export type LearningEntry = {
+  id: string;
+  derivedFromExperimentIds: string[];
+  statement: string;
+  confidence: 'low' | 'medium' | 'high';
+  createdAt: string;
+};
+
+// --- Site Understanding (DESIGN.md 6.7) ---
+
+export type PageSnapshot = {
+  path: string;
+  title?: string;
+  headings: string[];
+  excerpt: string;
+  excerptTruncated: boolean;
+  contentHash: string;
+  wordCount: number;
+  fetchedAt: string;
+};
+
+export type GscSummaryRow = {
+  query: string;
+  page: string | null;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+};
+
+export type SiteUnderstanding = {
+  schemaVersion: 2;
+  site: { baseUrl: string };
+  generatedAt: string;
+  pages: PageSnapshot[];
+  themes: string[];
+  proprietaryDataNotes: string[];
+  gscSummary?: {
+    window: { start: string; end: string; days: number };
+    topQueries: GscSummaryRow[];
+  };
+  maturity: SiteMaturity;
+};
+
+// --- rank-history.json (DESIGN.md 7.4, 9.2) ---
 
 export type RankSource = 'gsc' | 'websearch' | 'manual' | 'fixture';
 
-export type RankMeasurement = {
-  keyword: string;
-  rank: number | null;
-  impressions: number;
+export type RankHistoryRow = {
+  query: string;
+  page: string | null;
   clicks: number;
-  url?: string;
+  impressions: number;
+  ctr: number;
+  position: number;
 };
 
 export type RankHistoryEntry = {
   date: string;
   source: RankSource;
   window?: { start: string; end: string; days: number };
-  measurements: RankMeasurement[];
+  rows: RankHistoryRow[];
   note?: string;
 };
 
 export type RankHistory = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   entries: RankHistoryEntry[];
-};
-
-export type ImprovementStatus = 'active' | 'observing' | 'achieved';
-
-export type ChangeType =
-  | 'title'
-  | 'description'
-  | 'intro'
-  | 'faq'
-  | 'content'
-  | 'internal_link'
-  | 'data'
-  | 'other';
-
-export type ReviewOutcome =
-  | 'achieved'
-  | 'improved_not_achieved'
-  | 'no_effect'
-  | 'worse'
-  | 'insufficient_data';
-
-export type ImprovementAction = {
-  date: string;
-  rankAtAction: number | null;
-  rankSource: RankSource;
-  searchNeed: string;
-  gap: string[];
-  done: string;
-  changeType: ChangeType;
-  sources: string[];
-  baseline?: {
-    impressions?: number;
-    clicks?: number;
-  };
-  review?: {
-    date: string;
-    outcome: ReviewOutcome;
-    previousRank: number | null;
-    currentRank: number | null;
-    notes: string;
-  };
-};
-
-export type ImprovementKeywordState = {
-  keyword: string;
-  targetPath: string;
-  status: ImprovementStatus;
-  nextReviewDate: string | null;
-  actions: ImprovementAction[];
-};
-
-export type ImprovementLog = {
-  schemaVersion: 1;
-  keywords: ImprovementKeywordState[];
-};
-
-// --- Status buckets (DESIGN.md section 10) ---
-
-export type StatusBuckets = {
-  dueForReview: KeywordRecord[];
-  observing: KeywordRecord[];
-  active: KeywordRecord[];
-  achieved: KeywordRecord[];
 };
 
 // --- Adapters ---
 
-export type UnregisteredQuery = {
-  query: string;
-  rank: number;
-  impressions: number;
-  clicks: number;
-};
+export interface SiteReaderAdapter {
+  listPages(): Promise<Array<{ path: string; source: 'sitemap' | 'crawl' }>>;
+  readPage(path: string): Promise<{ path: string; html: string; text: string; title?: string; headings: string[] }>;
+}
 
 export interface GscAdapter {
-  fetchRankWindow(input: {
+  fetchQueryPageMatrix(input: {
     property: string;
     startDate: string;
     endDate: string;
-    watchwords: KeywordRecord[];
-  }): Promise<{
-    measurements: RankMeasurement[];
-    unregisteredQueries: UnregisteredQuery[];
-  }>;
+  }): Promise<{ rows: GscSummaryRow[] }>;
 }
 
 export type SerpInspection = {
-  keyword: string;
+  query: string;
   results: Array<{
     rank: number;
     title: string;
@@ -134,35 +280,8 @@ export type SerpInspection = {
 };
 
 export interface SearchAdapter {
-  inspectSerp(input: {
-    keyword: string;
-    targetUrl: string;
-    topN: number;
-  }): Promise<SerpInspection>;
+  inspectSerp(input: { query: string; topN: number }): Promise<SerpInspection>;
 }
-
-export type SeoPlanInput = {
-  keyword: KeywordRecord;
-  latestMeasurement: RankMeasurement | null;
-  targetPage: {
-    path: string;
-    content: string;
-  };
-  serp: SerpInspection;
-  previousActions: ImprovementAction[];
-};
-
-export type SeoPlan = {
-  searchNeed: string;
-  evidence: string[];
-  gaps: string[];
-  selectedGap: string;
-  changeType: ChangeType;
-  requestedChange: string;
-  requiredFacts: string[];
-  forbiddenChanges: string[];
-  sources: string[];
-};
 
 export interface NaturalWriterAdapter {
   transform(input: {
@@ -182,24 +301,32 @@ export interface NaturalWriterAdapter {
   }>;
 }
 
-export interface SiteAdapter {
-  readPage(targetPath: string): Promise<{ path: string; content: string }>;
-  apply(input: {
-    targetPath: string;
-    newText: string;
-    plan: SeoPlan;
-  }): Promise<{ changedFiles: string[]; summary: string }>;
+/** Milestone 2+. No implementation is wired to any Milestone 1A CLI command. */
+export interface SiteWriterAdapter {
+  apply(input: { targetPath: string; newText: string }): Promise<{ changedFiles: string[]; summary: string }>;
   validate(): Promise<{ ok: boolean; output: string }>;
 }
 
-// --- Config ---
+/** Milestone 2+. Only a NotImplemented stub exists in Milestone 1A. */
+export interface ActionExecutor {
+  supports(type: ActionType): boolean;
+  apply(input: {
+    action: Action;
+    site: SiteWriterAdapter;
+    writer: NaturalWriterAdapter;
+  }): Promise<{ changedFiles: string[]; summary: string }>;
+}
+
+// --- Config (DESIGN.md section 8) ---
 
 export type SeoConfig = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   site: {
     baseUrl: string;
-    repoRoot: string;
-    contentRoot: string;
+    mode: 'existing' | 'bootstrap';
+    reader: 'http' | 'filesystem';
+    repoRoot: string | null;
+    contentRoot: string | null;
   };
   gsc: {
     property: string;
@@ -210,15 +337,49 @@ export type SeoConfig = {
   };
   experiment: {
     cooldownDays: number;
-    oneKeywordPerRun: boolean;
   };
   commands: {
-    build: string;
-    test: string;
+    build: string | null;
+    test: string | null;
   };
   adapters: {
     writer: 'stub' | 'cli';
-    site: 'fixture' | 'filesystem';
+    site: 'http-readonly' | 'filesystem-readonly' | 'fixture';
     search: 'fixture' | 'file';
   };
+};
+
+// --- discover input (Skill -> CLI) ---
+
+export type DiscoverOpportunityInput = {
+  scope: OpportunityScope;
+  kind: OpportunityKind;
+  intentSlug: string;
+  title: string;
+  description: string;
+  evidence: Evidence[];
+  reopen?: boolean;
+  reopenReason?: string;
+};
+
+// --- propose input (Skill -> CLI) ---
+
+export type ProposeInput = {
+  hypothesis: {
+    statement: string;
+    expectedSignals: MetricKey[];
+    rationale: string;
+  };
+  action: Action;
+  measurementPlan: MeasurementPlan;
+};
+
+// --- status view (DESIGN.md section 11) ---
+
+export type StatusView = {
+  openOpportunities: number;
+  proposedExperiments: number;
+  observingExperiments: Array<{ id: string; opportunityTitle: string; nextReviewDate: string }>;
+  dueForReviewExperiments: Array<{ id: string; opportunityTitle: string }>;
+  concludedRecently: Experiment[];
 };

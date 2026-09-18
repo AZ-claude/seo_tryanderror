@@ -1,0 +1,23 @@
+{
+  "hypothesis": {
+    "statement": "本文冒頭にexample keywordの定義を1文追加すれば、CTRとimpressionsの両方が改善するはず",
+    "expectedSignals": ["ctr", "impressions"],
+    "rationale": "上位ページはいずれも冒頭で定義を明示しており、検索意図（用語を知りたい）に即応している"
+  },
+  "action": {
+    "type": "REVISE",
+    "targetPaths": ["/example/"],
+    "summary": "本文冒頭にexample keywordの定義を1文追加する（提案段階、未適用）",
+    "requiredFacts": ["example keywordの定義"],
+    "forbiddenChanges": ["既存のFAQセクションの削除"]
+  },
+  "measurementPlan": {
+    "targetPages": ["/example/"],
+    "targetQueries": ["example keyword"],
+    "primaryMetric": "ctr",
+    "secondaryMetrics": ["impressions", "clicks"],
+    "baselineWindowDays": 28,
+    "reviewWindowDays": 7,
+    "minimumImpressions": 10
+  }
+}

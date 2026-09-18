@@ -1,79 +1,67 @@
 import { cp, mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RunPaths } from '../src/core/run.js';
-import type { SeoConfig, SeoPlan, SerpInspection } from '../src/core/types.js';
+import { discoverInputFileSchema, proposeInputSchema } from '../src/core/schemas.js';
+import { readJsonFile } from '../src/infra/json-store.js';
+import { FixtureSiteReaderAdapter } from '../src/adapters/site-reader.js';
+import type { FixturePage } from '../src/adapters/site-reader.js';
+import type { GscAdapter, GscSummaryRow } from '../src/core/types.js';
 
 const REPO_ROOT = process.cwd();
 
 export type FixtureWorkdir = {
   dir: string;
-  siteDir: string;
-  paths: RunPaths;
+  paths: {
+    siteUnderstanding: string;
+    opportunities: string;
+    experiments: string;
+    rankHistory: string;
+    lock: string;
+  };
 };
 
-/** Copies the checked-in fixtures into an isolated temp dir so tests never mutate repo fixtures. */
+/** Copies the checked-in fixture data into an isolated temp dir so tests never mutate repo fixtures. */
 export async function setupFixtureWorkdir(): Promise<FixtureWorkdir> {
   const dir = await mkdtemp(join(tmpdir(), 'seo-fixture-'));
   const dataDir = join(dir, 'data', 'seo');
   await mkdir(dataDir, { recursive: true });
-  await cp(join(REPO_ROOT, 'fixtures/data/seo/watchwords.json'), join(dataDir, 'watchwords.json'));
-  await cp(join(REPO_ROOT, 'fixtures/data/seo/rank-history.json'), join(dataDir, 'rank-history.json'));
-  await cp(join(REPO_ROOT, 'fixtures/data/seo/improvement-log.json'), join(dataDir, 'improvement-log.json'));
-
-  const siteDir = join(dir, 'site');
-  await mkdir(siteDir, { recursive: true });
-  await cp(join(REPO_ROOT, 'fixtures/site/example.md'), join(siteDir, 'example.md'));
+  await cp(join(REPO_ROOT, 'fixtures/data/seo'), dataDir, { recursive: true });
 
   return {
     dir,
-    siteDir,
     paths: {
-      watchwords: join(dataDir, 'watchwords.json'),
+      siteUnderstanding: join(dataDir, 'site-understanding.json'),
+      opportunities: join(dataDir, 'opportunities.json'),
+      experiments: join(dataDir, 'experiments.json'),
       rankHistory: join(dataDir, 'rank-history.json'),
-      improvementLog: join(dataDir, 'improvement-log.json'),
       lock: join(dataDir, '.run.lock'),
     },
   };
 }
 
-export function fixtureConfig(overrides: Partial<SeoConfig> = {}): SeoConfig {
+export async function loadFixtureSitePages(): Promise<FixturePage[]> {
+  const raw = await readFile(join(REPO_ROOT, 'fixtures/site-v2/pages.json'), 'utf8');
+  return JSON.parse(raw) as FixturePage[];
+}
+
+export async function buildFixtureSiteReader(): Promise<FixtureSiteReaderAdapter> {
+  return new FixtureSiteReaderAdapter(await loadFixtureSitePages());
+}
+
+export async function buildFixtureGscAdapter(): Promise<GscAdapter> {
+  const raw = await readFile(join(REPO_ROOT, 'fixtures/gsc/query-page-matrix.json'), 'utf8');
+  const rows = JSON.parse(raw) as GscSummaryRow[];
   return {
-    schemaVersion: 1,
-    site: { baseUrl: 'https://example.com', repoRoot: '.', contentRoot: 'content' },
-    gsc: {
-      property: 'sc-domain:example.com',
-      credentialsEnv: 'GSC_SERVICE_ACCOUNT_JSON',
-      defaultWindowDays: 28,
-      reviewWindowDays: 7,
-      finalDataLagDays: 3,
+    async fetchQueryPageMatrix() {
+      return { rows };
     },
-    experiment: { cooldownDays: 7, oneKeywordPerRun: true },
-    commands: { build: 'true', test: 'true' },
-    adapters: { writer: 'stub', site: 'fixture', search: 'fixture' },
-    ...overrides,
   };
 }
 
-export const exampleKeywordSerp: SerpInspection = {
-  keyword: 'example keyword',
-  results: [
-    { rank: 1, title: 'Example Keyword: The Complete Guide', url: 'https://competitor-a.example.com', summary: 'Leads with a clear definition.' },
-  ],
-};
+export async function loadFixtureDiscoverInput() {
+  return readJsonFile(join(REPO_ROOT, 'fixtures/discover/opportunities.json'), discoverInputFileSchema);
+}
 
-export const exampleKeywordPlan: SeoPlan = {
-  searchNeed: '「example keyword」を検索する人は、まず用語の定義を知りたい',
-  evidence: ['上位ページは冒頭で定義を明示している'],
-  gaps: ['本文冒頭に定義がない'],
-  selectedGap: '本文冒頭に定義がない',
-  changeType: 'intro',
-  requestedChange: '冒頭にexample keywordの定義を1文で追加する',
-  requiredFacts: ['example keywordの定義'],
-  forbiddenChanges: [],
-  sources: [],
-};
-
-export async function readFileUtf8(path: string): Promise<string> {
-  return readFile(path, 'utf8');
+export async function loadFixtureProposeInput() {
+  return readJsonFile(join(REPO_ROOT, 'fixtures/propose/hypothesis.json'), proposeInputSchema);
 }

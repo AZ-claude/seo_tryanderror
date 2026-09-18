@@ -1,62 +1,39 @@
-import { getLatestRank } from './rank-lookup.js';
-import type { ImprovementLog, KeywordRecord, RankHistory, StatusBuckets } from './types.js';
-import { isBeforeOrEqual } from './date.js';
+import { addDays, isBeforeOrEqual } from './date.js';
+import type { Experiment, Opportunity, StatusView } from './types.js';
+
+const RECENTLY_CONCLUDED_WINDOW_DAYS = 30;
 
 /**
- * Classifies every watched keyword into one bucket. See DESIGN.md section 10.
- *
- * - achieved -> achieved
- * - observing && nextReviewDate <= today -> dueForReview
- * - observing && nextReviewDate > today -> observing
- * - else (no state, or status 'active') -> active
- *
- * `active` is sorted by latest known rank ascending (better rank first);
- * keywords with no measurement yet (rank === null) sort last.
+ * DESIGN.md section 11: opportunities/experiments status view, replacing the
+ * old keyword-bucket `getStatus()`. Pure function over already-loaded state.
  */
-export function getStatus(input: {
-  watchwords: KeywordRecord[];
-  improvementLog: ImprovementLog;
-  rankHistory: RankHistory;
+export function getStatusView(input: {
+  opportunities: Opportunity[];
+  experiments: Experiment[];
   today: string;
-}): StatusBuckets {
-  const { watchwords, improvementLog, rankHistory, today } = input;
-  const stateByKeyword = new Map(improvementLog.keywords.map((k) => [k.keyword, k]));
+}): StatusView {
+  const { opportunities, experiments, today } = input;
+  const titleFor = (opportunityId: string): string =>
+    opportunities.find((o) => o.id === opportunityId)?.title ?? '(unknown opportunity)';
 
-  const buckets: StatusBuckets = {
-    dueForReview: [],
-    observing: [],
-    active: [],
-    achieved: [],
+  const observingExperiments = experiments
+    .filter((e) => e.status === 'observing' && e.observation && !isBeforeOrEqual(e.observation.nextReviewDate, today))
+    .map((e) => ({ id: e.id, opportunityTitle: titleFor(e.opportunityId), nextReviewDate: e.observation!.nextReviewDate }));
+
+  const dueForReviewExperiments = experiments
+    .filter((e) => e.status === 'observing' && e.observation && isBeforeOrEqual(e.observation.nextReviewDate, today))
+    .map((e) => ({ id: e.id, opportunityTitle: titleFor(e.opportunityId) }));
+
+  const recentCutoff = addDays(today, -RECENTLY_CONCLUDED_WINDOW_DAYS);
+  const concludedRecently = experiments.filter(
+    (e) => e.status === 'concluded' && e.updatedAt.slice(0, 10) >= recentCutoff,
+  );
+
+  return {
+    openOpportunities: opportunities.filter((o) => o.status === 'open').length,
+    proposedExperiments: experiments.filter((e) => e.status === 'proposed').length,
+    observingExperiments,
+    dueForReviewExperiments,
+    concludedRecently,
   };
-
-  for (const kw of watchwords) {
-    const state = stateByKeyword.get(kw.keyword);
-
-    if (state?.status === 'achieved') {
-      buckets.achieved.push(kw);
-      continue;
-    }
-
-    if (state?.status === 'observing') {
-      if (state.nextReviewDate && isBeforeOrEqual(state.nextReviewDate, today)) {
-        buckets.dueForReview.push(kw);
-      } else {
-        buckets.observing.push(kw);
-      }
-      continue;
-    }
-
-    buckets.active.push(kw);
-  }
-
-  buckets.active.sort((a, b) => {
-    const rankA = getLatestRank(a.keyword, rankHistory);
-    const rankB = getLatestRank(b.keyword, rankHistory);
-    if (rankA === null && rankB === null) return 0;
-    if (rankA === null) return 1;
-    if (rankB === null) return -1;
-    return rankA - rankB;
-  });
-
-  return buckets;
 }

@@ -7,7 +7,7 @@ import { FileSearchAdapter, FixtureSearchAdapter, SearchAdapterError } from '../
 import type { SerpInspection } from '../src/core/types.js';
 
 const serp: SerpInspection = {
-  keyword: 'example keyword',
+  query: 'example keyword',
   results: [
     { rank: 1, title: 'A', url: 'https://a.example.com', summary: 'a' },
     { rank: 2, title: 'B', url: 'https://b.example.com', summary: 'b' },
@@ -17,17 +17,14 @@ const serp: SerpInspection = {
 
 test('FixtureSearchAdapter returns the matching fixture, truncated to topN', async () => {
   const adapter = new FixtureSearchAdapter({ 'example keyword': serp });
-  const result = await adapter.inspectSerp({ keyword: 'example keyword', targetUrl: '/example/', topN: 2 });
+  const result = await adapter.inspectSerp({ query: 'example keyword', topN: 2 });
   assert.equal(result.results.length, 2);
-  assert.equal(result.keyword, 'example keyword');
+  assert.equal(result.query, 'example keyword');
 });
 
-test('FixtureSearchAdapter throws for an unknown keyword', async () => {
+test('FixtureSearchAdapter throws for an unknown query', async () => {
   const adapter = new FixtureSearchAdapter({});
-  await assert.rejects(
-    () => adapter.inspectSerp({ keyword: 'missing', targetUrl: '/missing/', topN: 3 }),
-    SearchAdapterError,
-  );
+  await assert.rejects(() => adapter.inspectSerp({ query: 'missing', topN: 3 }), SearchAdapterError);
 });
 
 test('FileSearchAdapter reads and validates a --serp-file', async () => {
@@ -36,7 +33,7 @@ test('FileSearchAdapter reads and validates a --serp-file', async () => {
     const path = join(dir, 'serp.json');
     await writeFile(path, JSON.stringify(serp), 'utf8');
     const adapter = new FileSearchAdapter(path);
-    const result = await adapter.inspectSerp({ keyword: 'example keyword', targetUrl: '/example/', topN: 1 });
+    const result = await adapter.inspectSerp({ query: 'example keyword', topN: 1 });
     assert.equal(result.results.length, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -49,10 +46,7 @@ test('FileSearchAdapter rejects an invalid serp file', async () => {
     const path = join(dir, 'bad.json');
     await writeFile(path, JSON.stringify({ nope: true }), 'utf8');
     const adapter = new FileSearchAdapter(path);
-    await assert.rejects(
-      () => adapter.inspectSerp({ keyword: 'example keyword', targetUrl: '/example/', topN: 1 }),
-      SearchAdapterError,
-    );
+    await assert.rejects(() => adapter.inspectSerp({ query: 'example keyword', topN: 1 }), SearchAdapterError);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
