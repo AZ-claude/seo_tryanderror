@@ -15,6 +15,8 @@ export type UnderstandPaths = {
 
 export type UnderstandOptions = {
   baseUrl: string;
+  /** GSC Search Console property identifier (e.g. "sc-domain:example.com"), distinct from baseUrl. */
+  gscProperty: string;
   today: string;
   dryRun: boolean;
   maxPages?: number;
@@ -78,7 +80,7 @@ export async function runUnderstand(
       });
       try {
         const matrix = await gsc.fetchQueryPageMatrix({
-          property: options.baseUrl,
+          property: options.gscProperty,
           startDate: window.start,
           endDate: window.end,
         });

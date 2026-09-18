@@ -23,6 +23,7 @@ test('fixture E2E: understand -> discover -> prioritize -> propose produces a pr
     // 1. understand
     const understandResult = await runUnderstand(paths, siteReader, gsc, {
       baseUrl: 'https://example.com',
+      gscProperty: 'sc-domain:example.com',
       today: '2026-09-10',
       dryRun: false,
       gscWindowDays: 28,

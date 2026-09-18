@@ -33,6 +33,7 @@ test('understand --dry-run: site-understanding.json and rank-history.json are no
     const gsc = await buildFixtureGscAdapter();
     const result = await runUnderstand(paths, siteReader, gsc, {
       baseUrl: 'https://example.com',
+      gscProperty: 'sc-domain:example.com',
       today: '2026-09-10',
       dryRun: true,
       gscWindowDays: 28,

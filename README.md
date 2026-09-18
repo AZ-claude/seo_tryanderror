@@ -178,11 +178,17 @@ Opportunity候補を作る前の材料集めに使う。
 
 ## Known limitations(Milestone 1A)
 
-- `before`/`after` のwindow照合は、rank-history entryが持つ `window` フィールド
-  (無い場合はentry自体の `date`)と、MeasurementPlanから計算した対象windowの
-  重なりで判定する。手動記録などwindowを持たないentryが多いと粒度が粗くなる。
+- `before`/`after` は、`rank-history.json` の中から要求した `source` と一致し、
+  かつMeasurementPlanの対象windowと重なる(entryの `window`、無ければ `date` で
+  判定)entryのうち**最新の1件だけ**を選び、そのentry内のrowsだけを集計する。
+  GSC entryは既にwindow全体の集計スナップショットであり、複数entryを合算する
+  と重複期間分を二重計上してしまうため、複数entryの合算は行わない。完全な
+  日次時系列分析(重複を考慮した按分等)は必要になってから実装する。
 - Bootstrap Mode(`discover --theme`/`--assets-file` 相当)の自動化フックは
   未実装。`site-understanding.json` にページ/GSCデータが無い場合、discoverの
   reportにその旨を記載するのみ。
 - `--max-proposals` のような複数提案の上限フラグは無い(`propose` が常に
   1回1件のExperimentしか作らないため、実質的にガードレールの意図は満たされる)。
+- `RealGscAdapter` の `searchAnalytics/query` 呼び出しは `rowLimit: 5000` 固定。
+  pagination/25,000件対応は未実装のため、大規模サイトではquery×pageの全量を
+  1回のfetchで取得できない可能性がある(将来必要になってから対応する)。

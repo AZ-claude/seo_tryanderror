@@ -167,6 +167,7 @@ export async function cmdUnderstand(flags: Flags): Promise<number> {
 
   const result = await runUnderstand(paths, siteReader, gsc, {
     baseUrl: config.site.baseUrl,
+    gscProperty: config.gsc.property,
     today,
     dryRun,
     understandingOverride,
