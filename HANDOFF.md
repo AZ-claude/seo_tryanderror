@@ -85,9 +85,21 @@ Opportunityを発見し、仮説を立て、コンテンツの新規作成また
 `rakusetsu.com`。ただし**このセッション・このリポジトリの範囲では `rakusetsu.com` にも他repoにも一切変更を加えない**。
 実装が進んでもMilestone 1はread-onlyのみ。
 
-### 4.2 最初のマイルストーン（Milestone 1）
+### 4.2 最初のマイルストーン（Milestone 1、1A/1Bの2段階）
 
-DESIGN.md §17 の Existing Site flow のとおり:
+「fixtureのテストが通ること」と「`rakusetsu.com` で実際に役立つこと」は別の問いである。この2つを混同しないよう、
+Milestone 1を明示的に2段階へ分けた（DESIGN.md §19）。
+
+**Milestone 1A — Implementation qualification（coding agentのDefinition of Done）**
+
+`rakusetsu.com` や実GSCには一切アクセスせず、fixtureデータのみで
+`understand -> discover -> prioritize -> propose`（DESIGN.md §10, §17）の一連の型・ロジック・安全機構
+（identity単位のOpportunity dedupe、active experiment guard、MeasurementPlanに基づくbefore/after算出等）
+を実装・テストする。実装agentが承認待ちせず完了させるのはここまで。
+
+**Milestone 1B — rakusetsu.com live read-only validation（明示的に許可された後にのみ実行）**
+
+1Aの完了後、ユーザーが明示的に許可したタイミングでのみ実行する運用検証。
 
 1. `seo understand` — `rakusetsu.com` を読み取り専用（HTTP経由、sitemap + 浅いクロール）で読み、
    GSCが設定されていればクエリ×ページ行列も取得し、`site-understanding.json` を作る
@@ -95,9 +107,8 @@ DESIGN.md §17 の Existing Site flow のとおり:
 3. `seo prioritize` — 優先順位付け
 4. `seo propose` — 1件のExperiment（提案）を生成し、Markdown reportを出す
 
-**ここまでがMilestone 1の完了条件。** PRの作成やサイトへの実適用（apply mode）は行わない。
-実装完了後、まずこのフローの「品質」——Cが自力で筋の良いOpportunityと施策案を出せるか——を人間が確認してから、
-Milestone 2（apply mode、PR作成、B接続）へ進む。
+ここで初めて「Cが自力で筋の良いOpportunityと施策案を出せるか」を人間が評価する。PRの作成やサイトへの実適用
+（apply mode）は行わない。この評価結果を見てから、Milestone 2（apply mode、PR作成、B接続）へ進むかどうかを判断する。
 
 ### 4.3 GSCアクセスについて
 
@@ -132,17 +143,25 @@ Bootstrap Modeの自動化に投資する価値があるか判断できないた
 
 ---
 
-## 7. Definition of Done（Milestone 1）
+## 7. Definition of Done
 
-DESIGN.md §19 Acceptance Criteria を正とする。要約:
+### 7.1 Milestone 1A（coding agent）
+
+DESIGN.md §19.1 Acceptance Criteria を正とする。要約:
 
 - fixtureだけで `understand -> discover -> prioritize -> propose` が一周できる
 - サイトへの書き込みが一切発生しない（read-onlyアダプタのみ使用）
 - GSC credentialなしでも `not_configured` を明確にして進める
-- Opportunity/Experimentの重複・cooldownを正しく扱う
+- Opportunityのdedupeが `identity`（`scopeKey`+`intentKey`）単位で行われ、同一ページに複数Opportunityが共存できる
+- 同一Opportunityに未終結のExperimentがある間、新規Experimentを作れない（active experiment guard）
+- `MeasurementPlan` に基づき `before`/`after` が正しいscopeで算出され、データ不足は `no_effect` と混同されない
 - `history[]` のappend-only性が保証される
 - dry-runでファイルを書き換えない
 - reportを生成する
 - READMEだけでセットアップと運用が分かる
 
-この状態を確認できてから、Milestone 2（apply mode: B接続、PR作成、REVISE実行）へ進む。
+### 7.2 Milestone 1B（ユーザー明示許可後）
+
+DESIGN.md §19.2 を正とする。`rakusetsu.com` への実アクセスで、上記が実サイトに対しても機能し、かつサイト・
+リポジトリ・本番環境へのmutationが0件であることを確認する。ここで生成された初回proposalの品質を人間がレビューし、
+Milestone 2（apply mode: B接続、PR作成、REVISE実行）へ進むかどうかを判断する。

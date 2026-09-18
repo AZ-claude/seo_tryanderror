@@ -18,8 +18,8 @@
 
 ユーザー確認待ちにしてよいのは、secret/外部アカウント設定/本番不可逆変更/`rakusetsu.com`や他repoへの書き込みのみ。
 
-最初の実装マイルストーン（Milestone 1）のスコープは [§19 Acceptance Criteria](#19-acceptance-criteriav1-milestone-1) と
-[§21 実装順序](#21-実装順序milestone-1codexが実装時に迷わないための骨子)、および `IMPLEMENTATION_GOAL.md` を参照。
+最初の実装マイルストーン（Milestone 1A）のスコープは [§19 Acceptance Criteria](#19-acceptance-criteriav1) と
+[§21 実装順序](#21-実装順序milestone-1acodexが実装時に迷わないための骨子)、および `IMPLEMENTATION_GOAL.md` を参照。
 
 ---
 
@@ -98,7 +98,7 @@ theme
   -> 通常の学習ループ（Existing Site Modeと合流）
 ```
 
-DISCOVERコマンドは、`site-understanding.json` にページ・GSCデータが無ければ自動的にこの経路（theme起点の市場調査）にフォールバックする設計にしておく。CREATE系Actionと初期サイト構成の実行はV1で自動化しない（[§9.6](#96-action) 参照）。
+DISCOVERコマンドは、`site-understanding.json` にページ・GSCデータが無ければ自動的にこの経路（theme起点の市場調査）にフォールバックする設計にしておく。CREATE系Actionと初期サイト構成の実行はV1で自動化しない（[§9.6](#96-action-executor実行器) 参照）。
 
 ### 4.3 Maturity state（採用するが最小限）
 
@@ -132,33 +132,97 @@ type SiteMaturity = 'bootstrap' | 'exploring' | 'growing' | 'optimizing';
 
 「この市場・このサイトにはこういう需要／ギャップがある」という発見。主語はキーワードではなく需要（intent cluster）。
 
+**同じページに複数のOpportunityが同時に存在できる。** CTR/titleの改善余地、情報不足、独自データ追加の余地、異なるsearch intentへの対応漏れは、それぞれ別のOpportunityとして共存してよい。これは `page × search intent cluster × hypothesis` という基本単位の直接の帰結であり、dedupeは「ページ単位」ではなく「ページ×intent単位」で行う。
+
+#### 6.1.1 Identity（dedupeキー）
+
+Opportunityの同一性は、自由文の `title` ではなく決定論的な `identity` で判定する。
+
 ```ts
 type OpportunityScope =
   | { type: 'page'; path: string }
   | { type: 'cluster'; representativeQueries: string[] } // ページが存在しない/複数ページにまたがる需要
   | { type: 'site' }; // Bootstrap Modeの「サイト全体構成」レベルの発見
 
+// Opportunityの「種類」。自由文のtitleではなく、この統制語彙 + Skillが与える短いスラグで
+// intentを表現する。これにより「同じ需要を表現違いで何度も生成する」ことを防ぐ。
+type OpportunityKind =
+  | 'ctr_title'        // CTR/titleの改善余地
+  | 'content_gap'       // 検索ニーズに対する情報不足
+  | 'proprietary_data'  // 独自データ・一次情報を追加する余地
+  | 'intent_mismatch'   // 既存ページが別intentを想定している/対応漏れ
+  | 'other';
+
+type OpportunityIdentity = {
+  scopeKey: string;  // scopeから決定論的に導出（下記参照）。同一pathやqueryクラスタなら常に同じ文字列
+  intentKey: string;  // `${OpportunityKind}:${intentSlug}`。intentSlugはSkillが与える短いkebab-caseスラグ
+};
+```
+
+`scopeKey` の導出規則（pure function、テスト対象）:
+
+```text
+scope.type === 'page'    -> `page:${normalizedPath}`
+scope.type === 'cluster' -> `cluster:${sortedNormalizedQueries.join('|')}`  // normalizeQuery(NFKC/lowercase/空白除去)をGSC adapterから再利用
+scope.type === 'site'    -> `site`
+```
+
+`intentSlug` は自由文の要約ではなく、Skillが選ぶ短い識別子（例: `residual-supply-estimate`）。**titleの言い換えを許さないための制約として、intentSlugは自由文のtitleそのものをそのまま使ってはならない**（バリデーションで、intentSlugがtitleの単純な正規化と一致する場合は警告し再考を促す）。同じ需要を再発見したときにSkillが同じスラグを選べるよう、`discover`はページ内容の構造化ダンプに加えて**そのscopeに既に存在するOpportunityのidentity一覧（kind/intentSlug/title）をヒントとして提供する**（[§10.3](#103-discover)）。
+
+`OpportunityIdentity`（`scopeKey` + `intentKey` の組）が一致するOpportunityは同一とみなし、重複生成しない。逆に `scopeKey` が同じでも `intentKey` が異なれば別Opportunityとして共存する。
+
+#### 6.1.2 本体
+
+```ts
 type Opportunity = {
   id: string; // ULID
   createdAt: string;
   updatedAt: string;
   scope: OpportunityScope;
-  title: string; // 「未開封BOXの将来供給量を知りたい需要がある」のような一文
+  identity: OpportunityIdentity;
+  kind: OpportunityKind;
+  title: string; // 「未開封BOXの将来供給量を知りたい需要がある」のような一文。人間可読の要約であり、dedupeキーには使わない
   description: string;
   evidence: Evidence[];
+  // signals はcoreがevidenceから機械的に導出する（AIの自己申告ではない）。PRIORITIZEの入力になる。§10.4参照
+  signals: {
+    hasGscTraction: boolean; // evidenceにsource='gsc_query'|'gsc_page'が含まれる
+    contentGapConfirmed: boolean; // evidenceにsource='serp'が含まれる（上位比較済み）
+    leveragesProprietaryData: boolean; // evidenceにsource='proprietary_data'が含まれる
+  };
   status: 'open' | 'promoted' | 'rejected' | 'stale';
-  // promoted: 少なくとも1つのHypothesis/Experimentに発展した
-  // rejected: 検討したが見送り（理由をdescriptionかhistoryに残す）
-  // stale: 一定期間再評価されず、再UNDERSTANDが必要
+  // open: 新規Experiment提案の対象になれる（アクティブなExperimentが紐づいていない）
+  // promoted: proposed/approved/applied/observingのいずれかのExperimentが現在紐づいている（§7.3, §12のactive experiment guardの根拠）。
+  //           そのExperimentがconcluded/rejectedになった時点でcoreが自動的にopenへ戻す
+  // rejected: 検討したが見送りと明示的に判断した（理由をhistoryに残す）。discover時に自動では再浮上しない
+  // stale: V1では自動遷移させない（予約のみ。将来、再UNDERSTANDが必要な鮮度切れ検知に使う）
   history: OpportunityEvent[]; // append-only
 };
 
 type OpportunityEvent = {
   at: string;
-  type: 'discovered' | 'promoted' | 'rejected' | 'reopened' | 'note';
+  type: 'discovered' | 'promoted' | 'released' | 'rejected' | 'reopened' | 'note';
+  // promoted: open -> promoted（Experiment作成時）
+  // released: promoted -> open（紐づくExperimentがconcluded/rejectedになり、他にアクティブなExperimentが無い場合、core自動発行）
+  // rejected: 明示的にOpportunity自体を見送ると判断
+  // reopened: rejectedからopenへの明示的な復帰（後述、理由必須）
   note?: string;
+  relatedExperimentId?: string;
 };
 ```
+
+#### 6.1.3 再発見ルール（reopen / reject / promote後の扱い）
+
+DISCOVERが同一 `identity` のOpportunityを既存データの中に見つけたときの扱いを固定する。
+
+| 既存Opportunityのstatus | discoverの挙動 |
+|---|---|
+| `open` | 新規作成しない。新しいevidenceがあれば `evidence[]` に追記し、`updatedAt` を更新。重複作成としてreportに記載 |
+| `promoted` | 新規作成しない。「アクティブなExperimentが既にある」旨をreportに記載し、スキップ（[§12](#12-safety--guardrails)のactive experiment guardと整合） |
+| `rejected` | **自動では再浮上させない。** `--opportunities-file` の該当エントリに明示的な `reopen: true` とその理由（`reopenReason: string`、必須）が含まれている場合のみ、coreが `status: 'open'` に戻し `reopened` イベントを追記する。理由が無い場合はスキップしreportに「rejected済み、reopenするには理由が必要」と記載 |
+| `stale` | V1では発生しない（stale自動遷移は未実装のため） |
+
+同一 `scopeKey` だが `intentKey` が異なる場合は、常に別Opportunityとして新規作成してよい（重複ではない）。
 
 ### 6.2 Evidence
 
@@ -209,7 +273,7 @@ type MetricKey =
 
 ### 6.4 Action
 
-Hypothesisを実行に移す変更の種類。V1で**自動実行するのはREVISEのみ**（それもMilestone 2以降、[§9.6](#96-action)参照）。他は型として定義するが実行器（executor）は用意しない/スタブでNotImplementedとする。
+Hypothesisを実行に移す変更の種類。V1で**自動実行するのはREVISEのみ**（それもMilestone 2以降、[§9.6](#96-action-executor実行器)参照）。他は型として定義するが実行器（executor）は用意しない/スタブでNotImplementedとする。
 
 ```ts
 type ActionType = 'CREATE' | 'REVISE' | 'LINK' | 'MERGE' | 'SPLIT' | 'RETIRE';
@@ -225,7 +289,33 @@ type Action = {
 
 ### 6.5 Experiment（旧 ImprovementKeywordState + ImprovementAction を統合・一般化）
 
-「このOpportunityとHypothesisに基づき、このActionを行い、結果はこうだった」という一連の試行。**これがExperiment Memoryの単位**。
+「このOpportunityとHypothesisに基づき、このMeasurementPlanで測ると決め、このActionを行い、結果はこうだった」という一連の試行。**これがExperiment Memoryの単位**であり、構成要素は
+
+```text
+Opportunity -> Hypothesis -> Action -> MeasurementPlan -> Before -> After -> Result -> Learning
+```
+
+の順で並ぶ。
+
+#### 6.5.1 MeasurementPlan
+
+「何を測ればHypothesisが支持されたと判断できるか」を、Experiment作成時に固定する。これがないと `before`/`after` の比較対象があいまいになり、Experiment Memoryが学習資産として機能しない。
+
+```ts
+type MeasurementPlan = {
+  targetPages: string[]; // before/afterの集計対象ページ（Action.targetPathsと一致することが多いが、独立して持つ）
+  targetQueries?: string[]; // 対象クエリ/intent clusterを絞りたい場合（省略時はtargetPagesの全クエリを対象）
+  primaryMetric: MetricKey; // Hypothesis支持/不支持の主判定に使う指標
+  secondaryMetrics: MetricKey[]; // 参考指標
+  baselineWindowDays: number; // beforeスナップショットの集計window長
+  reviewWindowDays: number; // afterスナップショットまでの観察期間（旧cooldownDaysに相当）
+  minimumImpressions?: number; // これ未満のimpressionsしか無い場合はinsufficient_dataとする閾値
+};
+```
+
+`primaryMetric`/`secondaryMetrics` は [§6.3](#63-hypothesis) の `Hypothesis.expectedSignals` と整合させる（`primaryMetric` は `expectedSignals` に含まれる指標から選ぶ）。
+
+#### 6.5.2 Experiment本体
 
 ```ts
 type ExperimentStatus =
@@ -239,8 +329,10 @@ type ExperimentStatus =
 type MetricsSnapshot = {
   at: string;
   source: 'gsc' | 'ga4' | 'websearch' | 'manual' | 'fixture';
-  window?: { start: string; end: string; days: number };
+  window: { start: string; end: string; days: number };
+  scope: { targetPages: string[]; targetQueries?: string[] }; // MeasurementPlanのscopeをそのまま転記（監査用）
   metrics: Partial<Record<MetricKey, number>>;
+  sufficientData: boolean; // MeasurementPlan.minimumImpressionsを満たしたか
 };
 
 type Experiment = {
@@ -248,10 +340,11 @@ type Experiment = {
   opportunityId: string;
   hypothesisId: string;
   action: Action;
+  measurementPlan: MeasurementPlan;
   status: ExperimentStatus;
-  before: MetricsSnapshot | null; // insufficient_dataならnull
+  before: MetricsSnapshot | null; // sufficientData=falseで作れない場合はnull（insufficient_data）
   after?: MetricsSnapshot;
-  observation?: { start: string; end: string; cooldownDays: number; nextReviewDate: string };
+  observation?: { start: string; end: string; nextReviewDate: string };
   result?: {
     outcome: ReviewOutcome;
     notes: string;
@@ -278,6 +371,14 @@ type ExperimentEvent = {
 
 旧 `ImprovementAction.review.outcome`（achieved / improved_not_achieved / no_effect / worse / insufficient_data）を `ReviewOutcome` に写像し直した。「1位達成」という単一ゴールを前提にしないため `achieved` は `hypothesis_supported` に、"改善したが未達"は `partially_supported` に一般化する。
 
+#### 6.5.3 before/afterの算出ルール（scope・data lag・insufficient_data）
+
+- `before`/`after` は**「最新のrank-history全体」ではなく、`measurementPlan.targetPages`/`targetQueries` に一致する行だけを `rank-history.json` から抽出して集計する**。旧設計の「登録watchwordの最新測定値をそのまま使う」実装（`getLatestMeasurementWithSource`）はこの用途には使わない
+- `before` の集計windowは `baselineWindowDays`、`after` は `reviewWindowDays` 経過後に、現行の `computeMeasurementWindow`（`finalDataLagDays` を考慮した終端日ずらし）をそのまま再利用して計算する
+- 集計したimpressions合計が `minimumImpressions` 未満（未設定なら現行同様データが1件も無い場合）は `sufficientData: false` とし、`ReviewOutcome` は必ず `insufficient_data` にする。**`no_effect`（差が無かった）と `insufficient_data`（測れなかった）を混同しない**という現行原則をscope限定後も維持する
+- `after` が未取得の間（`observing`中）は `result` を確定させない
+- fixture testでは、`measurementPlan.targetPages` を意図的に一部ページのみに絞ったケースを用意し、`before` スナップショットが**そのページのみ**から算出されること（他ページの数値が混入しないこと）を検証する
+
 ### 6.6 Learning（集約ビュー）
 
 個々のExperimentの `learning` フィールドがExperiment Memoryの本体。加えて、サイト単位で横断的な学習を読みやすくするための集約ビューを `learnings.json` として持たせてよい（v1では手動/簡易生成でよい。専用要約エンジンは作らない）。
@@ -296,20 +397,25 @@ type LearningEntry = {
 
 READ/UNDERSTANDフェーズの成果物。Opportunity発見の入力になる、Cが持つ「このサイトの理解」のスナップショット。**都度作り直せるキャッシュ**であり、append-onlyではない（前回分は上書き。監査したい場合はreportsに残る）。
 
+**DISCOVERはページ本文を必要とする。** `understand`が収集した本文を捨てて `path`/`title`/`headings`/`wordCount` だけを残すと、DISCOVERがページ内容の根拠を持てなくなる。かといって全文を無制限に永続化するのはYAGNIに反する（vector store等の大規模基盤は作らない）。そこで、**bounded excerpt + content hash** をこの1ファイルの中に保持する（案A相当。専用の別ファイルは追加せず、既存の `site-understanding.json` を拡張するだけに留める）。
+
 ```ts
-type PageSummary = {
+type PageSnapshot = {
   path: string; // サイト内相対パス、またはfull URL（HTTP読み取り時）
   title?: string;
-  headings?: string[];
-  wordCount?: number;
-  lastFetchedAt: string;
+  headings: string[];
+  excerpt: string; // クリーニング済みテキストの先頭から最大 EXCERPT_MAX_CHARS（既定4000文字、設定可能）まで
+  excerptTruncated: boolean; // 本文がexcerptより長く切り詰められたか
+  contentHash: string; // クリーニング済みテキスト全体のsha256。差分検知・provenance用（本文自体は保存しない）
+  wordCount: number;
+  fetchedAt: string;
 };
 
 type SiteUnderstanding = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   site: { baseUrl: string };
   generatedAt: string;
-  pages: PageSummary[];
+  pages: PageSnapshot[];
   themes: string[]; // Cが読んで抽出したトピック一覧（自由記述、構造化しすぎない）
   proprietaryDataNotes: string[]; // 独自データ・一次情報として見つけたものの記述
   gscSummary?: {
@@ -319,6 +425,10 @@ type SiteUnderstanding = {
   maturity: SiteMaturity;
 };
 ```
+
+**Provenance:** DISCOVERは `SiteReaderAdapter` を再取得せず、`understand` が生成したこの `site-understanding.json` のみを入力とする。したがって同じ `site-understanding.json`（同じ `generatedAt`）を使う限り、DISCOVERの入力は完全に再現可能。`Evidence.source === 'existing_page'` のエビデンスは `ref` に `${path}#${contentHash}` を入れ、どのスナップショット時点のどのページ本文を根拠にしたかを一意に追跡できるようにする。サイトが `understand` と `discover` の間で変わっていても、DISCOVERが見ているのは常に最後の `understand` 実行時点のスナップショットであり、二重取得や未知のcrawl回数増加は発生しない（再UNDERSTANDしない限りDISCOVERはHTTPアクセスを一切行わない）。
+
+excerptの上限（`EXCERPT_MAX_CHARS`）は既存の「GSCの生クエリ×ページ行列を無制限に永続化しない」というガードレールと同じ精神で、ページ本文についても上限を設ける（[§12](#12-safety--guardrails)に追記）。
 
 ---
 
@@ -348,16 +458,19 @@ data/seo/
 ### 7.2 opportunities.json のwrite rule
 
 - `id` はcreate時発行、以後不変
-- `status` は更新可能
+- `identity`（`scopeKey`+`intentKey`）はcreate時発行、以後不変。dedupeはこの `identity` の完全一致で判定する（[§6.1.1](#611-identitydedupeキー)）。**`scope`単位のdedupeは行わない**——同一ページに複数のOpportunityが共存できる
+- `status` は更新可能。ただし `open <-> promoted` の遷移はcoreがExperimentの状態変化に応じて自動的に行う（[§7.3](#73-experimentsjson-のwrite-rule)）。`rejected`/`reopened` は明示的な操作でのみ発生する（[§6.1.3](#613-再発見ルールreopen--reject--promote後の扱い)）
 - `history[]` はappend-onlyの専用API (`appendOpportunityEvent`) 経由のみ
-- 同一 `scope` に対して `status: 'open'` のOpportunityが重複しないようにする（discover時にdedupe）
+- `signals` はcoreが `evidence[]` から機械的に再計算する派生値であり、外部から直接書き込ませない
 
 ### 7.3 experiments.json のwrite rule
 
 - `id` は不変
 - `status` 遷移は許可された遷移のみ（`proposed -> approved -> applied -> observing -> concluded`、または各段階から `rejected`）。不正な遷移はエラー
+- **Active experiment guard**: 同一 `opportunityId` に対し、`status` が `proposed`/`approved`/`applied`/`observing` のいずれかであるExperimentが既に存在する間は、新しいExperimentを作成できない。`propose --opportunity-id` を直接指定した場合もcore側でこのチェックを行い拒否する（[§12](#12-safety--guardrails)）。`rejected`または`concluded`に達すると、対応するOpportunityは自動的に `status: 'open'` へ戻り（`released` イベント追記）、新規Experimentの作成が再び可能になる。追加のcooldownは課さない（`observing`期間そのものが十分な待機期間である）
 - `history[]` はappend-onlyの専用API経由のみ
 - `before` は一度設定したら不変。`after`/`result`/`learning` は観察終了時にのみ設定
+- `measurementPlan` はcreate時発行、以後不変（[§6.5.1](#651-measurementplan)）。`before`/`after` は必ず `measurementPlan` の scope（`targetPages`/`targetQueries`）に基づいて算出する
 
 ### 7.4 rank-history.json
 
@@ -399,9 +512,11 @@ data/seo/
 }
 ```
 
-`experiment.oneKeywordPerRun` は廃止（キーワード中心モデルの廃止に伴う）。代わりに「1 discoverあたり生成するproposalの上限」を運用ガードとして持たせてよいが、これはCLIオプション（`--max-proposals`）で十分であり、config必須項目にはしない。
+`experiment.oneKeywordPerRun` は廃止(キーワード中心モデルの廃止に伴う)。代わりに「1 discoverあたり生成するproposalの上限」を運用ガードとして持たせてよいが、これはCLIオプション(`--max-proposals`)で十分であり、config必須項目にはしない。
 
-`commands.build`/`commands.test` はMilestone 1では未使用（read-onlyのため）。`site.reader: "http"` かつ `mode: "existing"` かつ `repoRoot: null` が `rakusetsu.com` の初期構成になる。
+`gsc.reviewWindowDays`/`experiment.cooldownDays` は**既定値**であり、`propose`時にSkillが `MeasurementPlan.baselineWindowDays`/`reviewWindowDays`([§6.5.1](#651-measurementplan))を明示しなければこれらの値が使われる。個々のExperimentの実測window長は最終的に `MeasurementPlan` に固定され、後から config を変えても既存Experimentの判定基準は変わらない(監査可能性のため)。
+
+`commands.build`/`commands.test` はMilestone 1では未使用(read-onlyのため)。`site.reader: "http"` かつ `mode: "existing"` かつ `repoRoot: null` が `rakusetsu.com` の初期構成になる。
 
 ---
 
@@ -541,7 +656,7 @@ publish            ← Milestone 2以降
 npm run seo -- understand --config config/seo.config.json
 ```
 
-1. `SiteReaderAdapter.listPages()` → `readPage()` で全ページ（上限あり、設定可能）のtext/headingsを収集
+1. `SiteReaderAdapter.listPages()` → `readPage()` で全ページ（上限あり、設定可能）のtext/headingsを収集し、各ページを `PageSnapshot`（`excerpt`＋`contentHash`＋`wordCount`、[§6.7](#67-site-understanding新規)）に変換する。excerptは `EXCERPT_MAX_CHARS` で機械的に切り詰め、全文は保持しない
 2. GSC設定があれば `GscAdapter.fetchQueryPageMatrix()` でクエリ×ページ行列を取得し、`rank-history.json` にsource='gsc'のentryとしてappend
 3. Cが読んだ内容から `themes`/`proprietaryDataNotes` を抽出する部分は**構造化input/output越しにAIへ委譲する**（旧Plan生成と同じパターン）。CLIは `--understanding-file <json>`（Skillが事前にページ内容を読んで生成した themes/proprietaryDataNotes の下書き）をマージ入力として受け付ける。CLI単体はページ本文の機械的収集とGSC取得のみ行い、意味理解（テーマ抽出等）そのものはしない。
 4. `site-understanding.json` を atomic writeで上書き保存
@@ -554,8 +669,9 @@ GSC未設定でも失敗させない。`gscSummary` を省略して `site-unders
 npm run seo -- discover --config config/seo.config.json --opportunities-file <json>
 ```
 
-- `site-understanding.json` を読み、Opportunity候補生成の材料（ページ内容、GSCクエリ×ページ、独自データ）をCLIが構造化して出力できるようにする（`seo discover --dump-inputs` のようなヘルパーでSkillに渡す）。
-- 実際のOpportunity/Evidence/Hypothesis生成（意味理解）はSkill側（AI）が行い、`--opportunities-file` としてCLIへ渡す。CLIはこのファイルをスキーマ検証し、`opportunities.json` へ**重複排除しながら**マージする（同一 `scope` でstatus:openが既存ならスキップしreportに記載）。
+- `site-understanding.json`（ページの`excerpt`/`headings`込み、[§6.7](#67-site-understanding新規)）を読み、Opportunity候補生成の材料（ページ内容、GSCクエリ×ページ、独自データ）をCLIが構造化して出力できるようにする（`seo discover --dump-inputs` のようなヘルパーでSkillに渡す）。**この時点でCLIは再クロールしない** — 入力は常に直近の `understand` が保存したスナップショットのみ（[§6.7 Provenance](#67-site-understanding新規)）
+- `--dump-inputs` の出力には、既存 `opportunities.json` に登録済みの `identity`（`scopeKey`/`intentKey`/`kind`/`title`）一覧も含める。Skillはこれを見て、同じ需要を再発見した場合に同じ `kind`+`intentSlug` を選べる（[§6.1.1](#611-identitydedupeキー)）
+- 実際のOpportunity/Evidence/Hypothesis生成（意味理解）はSkill側（AI）が行い、`--opportunities-file` としてCLIへ渡す。CLIはこのファイルをスキーマ検証し、`opportunities.json` へ**`identity`（`scopeKey`+`intentKey`）単位で重複排除しながら**マージする。挙動は [§6.1.3](#613-再発見ルールreopen--reject--promote後の扱い) の表のとおり（`open`はevidence追記のみ、`promoted`はスキップ、`rejected`は明示的reopenが無い限りスキップ）。**同一`scopeKey`でも`intentKey`が異なれば必ず新規作成する**
 - GSCデータが無い（Bootstrap Mode相当）場合は、`pages.length === 0` かつ `gscSummary === undefined` を検知し、reportに「market/SERP research起点でのdiscoverが必要」という誘導を出す。この経路の自動化はV1では行わない（[§4.2](#42-bootstrap-mode設計のみ実装は後続milestone)）。
 
 ### 10.4 PRIORITIZE
@@ -569,14 +685,25 @@ function prioritizeOpportunities(input: {
 }): { ranked: Opportunity[]; excluded: Array<{ id: string; reason: string }> };
 ```
 
-Bucket例（実装時に確定させてよいが、方向性は固定）:
+**V1のbucket規則をここで確定する（正本はDESIGN.mdであり、実装時に変更しない）。** 順位はGSC順位（position）に依存させない——「position 2〜20だから最優先」という旧keyword中心設計には戻らない。判断材料は `Opportunity.signals`（[§6.1.2](#612-本体)、evidenceから機械的に導出済み）と過去のExperiment結果、active experiment guard、実行可能性の4点に限定し、複雑なスコアリングエンジンは作らない。
 
-1. GSC evidenceが複数あり、既存ページがあり（`scope.type === 'page'`）、position 2〜20 — 「もう一歩でクリック/上位化」する既存資産
-2. GSC evidenceはあるが対応ページが無い（`scope.type === 'cluster'`）— コンテンツギャップ
-3. 過去にExperimentが `no_effect`/`worse` で終わり、まだ再挑戦していない対象で、evidenceが更新されたもの
-4. サイト全体・Bootstrap系（`scope.type === 'site'`）は最低優先（V1では通常出てこない）
+対象: `status === 'open'` のOpportunityのみ（`promoted`/`rejected`/`stale` は除外——`promoted` は [§7.3 active experiment guard](#73-experimentsjson-のwrite-rule) によりアクティブなExperimentが既にあることを意味するため、cooldown中の除外は自動的にここに含まれる）。
 
-除外: `status !== 'open'` のOpportunity、直近で `observing` 中のExperimentが紐づくOpportunity（cooldown中は同一opportunityへの新規提案を作らない）。
+Bucket（上から優先）:
+
+1. **実需要のある既存資産の改善**: `signals.hasGscTraction && signals.contentGapConfirmed && scope.type === 'page'` — GSCで実際に反応があり、かつSERP比較で不足が確認済みの既存ページ。最も確度が高く実行可能性も高い
+2. **実需要のあるコンテンツギャップ**: `signals.hasGscTraction && scope.type === 'cluster'` — 需要は確認できるが対応ページが無い
+3. **独自データを活かせる差別化**: `signals.leveragesProprietaryData` かつ Bucket 1/2に該当しないもの — 実需要がまだ弱くても、他サイトが真似できない一次情報を武器にできる機会
+4. **再挑戦**: 同一 `identity` に紐づく過去のExperimentが `no_effect`/`worse`/`partially_supported` で `concluded` しており（＝`released`済みで現在`open`）、`evidence[]` が前回のExperiment作成時点より増えている（新しい根拠が追加されている）もの
+5. **その他**: 上記いずれにも該当しないもの（`scope.type === 'site'` を含む。Existing Site ModeのV1では通常空、Bootstrap Mode向けの受け皿）
+
+同一bucket内のtie breaker（決定論的、上から順に適用）:
+
+1. `evidence.length` 降順（根拠が多いほど優先）
+2. `createdAt` 昇順（発見が古いものを先に——飢餓状態を防ぐ）
+3. `id` 昇順（最終的な決定論的タイブレーク）
+
+除外: `status !== 'open'` のOpportunity全て。
 
 ```bash
 npm run seo -- prioritize --config config/seo.config.json
@@ -593,11 +720,12 @@ npm run seo -- propose --config config/seo.config.json \
   --serp-file <json>
 ```
 
-1. 指定Opportunityに対し、Skillが `Hypothesis` と `Action`（提案）を構造化JSONとして用意し渡す
-2. CLIはスキーマ検証し、`Experiment { status: 'proposed' }` を新規作成して `experiments.json` に追加
-3. `before` snapshotは `rank-history.json` の最新entryから機械的に埋める（データが無ければ `null` とし `insufficient_data` 相当のマークをつける。「無い」ことを「効果なし」と混同しない、という現行の原則をここでも維持する）
-4. Opportunityを `status: 'promoted'` に更新し、`history` にeventを追記
-5. Markdown report（`reports/YYYY-MM-DD-HHMMSS.md`）を生成。**これがMilestone 1における最終成果物**。サイトへの書き込みは一切発生しない
+1. **Active experiment guard**: 指定Opportunityに `proposed`/`approved`/`applied`/`observing` のいずれかのExperimentが既に紐づいていれば、`--opportunity-id` を直接指定していても即エラーで停止する（[§7.3](#73-experimentsjson-のwrite-rule)）。`open` でないOpportunity（`rejected`/`stale`）も同様に拒否する
+2. 指定Opportunityに対し、Skillが `Hypothesis` と `Action`（提案）に加えて `MeasurementPlan`（[§6.5.1](#651-measurementplan)）を構造化JSONとして用意し渡す
+3. CLIはスキーマ検証し、`Experiment { status: 'proposed' }` を新規作成して `experiments.json` に追加
+4. `before` snapshotは `measurementPlan.targetPages`/`targetQueries` にscopeした `rank-history.json` のエントリから機械的に算出する（[§6.5.3](#653-beforeafterの算出ルールscopedata-laginsufficient_data)）。scope内のimpressions合計が `minimumImpressions` 未満、またはデータが無ければ `before: null` とし `insufficient_data` 相当のマークをつける。「無い」ことを「効果なし」と混同しない、という現行の原則をここでも維持する
+5. Opportunityを `status: 'promoted'` に更新し、`history` に `promoted` eventを追記
+6. Markdown report（`reports/YYYY-MM-DD-HHMMSS.md`）を生成。**これがMilestone 1における最終成果物**。サイトへの書き込みは一切発生しない
 
 **V1 Milestone 1はここで終わる。** サイトへのapply、B呼び出し、PR作成は行わない。
 
@@ -607,7 +735,9 @@ npm run seo -- propose --config config/seo.config.json \
 npm run seo -- apply --config config/seo.config.json --experiment-id <id>
 ```
 
-旧 `runSeoLoop` のtransaction semantics（[§13](#13-transaction-semantics)）をそのまま踏襲し、`Action.type === 'REVISE'` のExperimentのみ実行可能にする。成功時は `status: 'applied'` → 観察期間設定で `status: 'observing'`。この時点でもリポジトリへの直接pushは行わず、**ブランチ作成+diff提示（PR相当）までをCLIまたはSkillの責務とし、mergeは人間が行う**。「本番への直接pushは初期V1では不要」という要求を、Milestone 2に入ってもなお守る設計とする。
+旧 `runSeoLoop` のtransaction semantics（[§13](#13-transaction-semanticsmilestone-2向け設計として確定させておく)）をそのまま踏襲し、`Action.type === 'REVISE'` のExperimentのみ実行可能にする。成功時は `status: 'applied'` → 観察期間設定で `status: 'observing'`。この時点でもリポジトリへの直接pushは行わず、**ブランチ作成+diff提示（PR相当）までをCLIまたはSkillの責務とし、mergeは人間が行う**。「本番への直接pushは初期V1では不要」という要求を、Milestone 2に入ってもなお守る設計とする。
+
+観察期間終了後（`observation.nextReviewDate` 到達後）のレビューでは、`after` snapshotを `before` と同じ `measurementPlan` のscope・windowルール（[§6.5.3](#653-beforeafterの算出ルールscopedata-laginsufficient_data)）で算出し、`Experiment.status` を `concluded` にする。この時点でOpportunityは自動的に `open` へ戻る（`released` イベント、[§6.1.2](#612-本体)）。
 
 ---
 
@@ -650,11 +780,14 @@ type StatusView = {
 現行のGuardrailsは基本的に全て維持し、モデル変更に合わせて言い換える。
 
 - 1 discoverで作るproposal（Experiment）数には上限を設ける（デフォルト1、`--max-proposals` で変更可）。「1 runで新規改善は1 keyword」の精神を「1回のPROPOSEで積み上げる提案は絞る」に一般化
-- `observing` 中のExperimentに紐づくOpportunityへは、cooldown（`nextReviewDate`）前に新規Experimentを作らない
+- **Active experiment guard**: 同一Opportunityに `proposed`/`approved`/`applied`/`observing` のExperimentが存在する間、新しいExperimentは（`propose --opportunity-id` の直接指定であっても）core側で拒否する。これは `Opportunity.status === 'promoted'` として表現され、対応するExperimentが `concluded`/`rejected` になった時点で自動的に `open` へ戻る（[§7.3](#73-experimentsjson-のwrite-rule)、[§6.1.2](#612-本体)）
 - `concluded` なExperimentは監視のみ（過去のExperimentを書き換えない）
 - `rank-history.json` はappend-only（現行のまま）
 - `opportunities.json`/`experiments.json` の `history[]` はappend-only
 - GSCの生クエリ×ページ行列を無制限に永続化しない。`site-understanding.json.gscSummary.topQueries` は上位N件に絞る（旧: impressions>=10, top20 の踏襲）
+- **ページ本文を無制限に永続化しない**。`site-understanding.json` に保存するページ本文は `EXCERPT_MAX_CHARS`（既定4000文字）で切り詰めた `excerpt` のみとし、全文は保存しない（[§6.7](#67-site-understanding新規)）
+- `rejected` なOpportunityは、`--opportunities-file` に明示的な `reopen: true` + 理由が無い限りdiscoverが自動的に再浮上させない（[§6.1.3](#613-再発見ルールreopen--reject--promote後の扱い)）
+- Opportunityのdedupeは `identity`（`scopeKey`+`intentKey`）単位で行い、`scope` 単位では行わない——同じページに複数の異なるintentのOpportunityが共存できることを前提にする（[§6.1.1](#611-identitydedupeキー)）
 - secretをログ・commitに含めない
 - 独自Google SERPスクレイパーは作らない
 - **noindex/canonical/URL/大規模IA変更の自動実行は禁止**（提案としてAction type `RETIRE`/`SPLIT`/`MERGE` を出すことはあっても、executorは用意しない）
@@ -756,6 +889,8 @@ JSON file writeはtemp file + renameでatomicにする（現行 `writeJsonFileAt
 
 ## 17. Existing Site flow（rakusetsu.com、詳細）
 
+**このフローの実行は Milestone 1B（[§19.2](#192-milestone-1b--rakusetsucom-live-read-only-validation明示的に許可された後にのみ実行)）に属する。** 実装agentがfixtureだけで実装を完了させる Milestone 1A の範囲には、`rakusetsu.com` への実際のアクセスは含まれない。
+
 ```text
 1. seo understand --config config/seo.rakusetsu.json
    - HttpSiteReaderAdapterでsitemap.xml or トップページからクロール（上限件数・深さは設定）
@@ -795,26 +930,49 @@ theme + available assets
 
 ---
 
-## 19. Acceptance Criteria（V1 Milestone 1）
+## 19. Acceptance Criteria（V1）
 
-以下が全て満たされたらMilestone 1 COMPLETE。
+V1を2段階に分ける。**fixture E2EがPASSすることは「rakusetsu.comで使える」ことを意味しない。** それを評価するのは意図的に分離されたMilestone 1Bである。
+
+### 19.1 Milestone 1A — Implementation qualification（coding agentのDefinition of Done）
+
+実装agentは、ここまでを**ユーザー確認待ちにせず**完了させる。`rakusetsu.com`・GSC・その他本番環境には一切アクセスしない。
 
 - [ ] clean install成功
 - [ ] typecheck/build成功
 - [ ] 全tests PASS
 - [ ] fixture E2E PASS（`understand -> discover -> prioritize -> propose` を fixtureサイト/fixture GSCデータで一周できる）
-- [ ] `site-understanding.json` がread-onlyで生成される（サイト・リポジトリへの書き込み一切なし）
+- [ ] `HttpSiteReaderAdapter` のfixture test（sitemapパース、クロール上限、テキスト抽出、robots.txt尊重）がPASS
+- [ ] `site-understanding.json` がread-onlyで生成される（サイト・リポジトリへの書き込み一切なし。`SiteReaderAdapter` が型として書き込みメソッドを持たないことで担保）
 - [ ] GSC未設定でも `understand` が失敗せず `GSC_NOT_CONFIGURED` を区別して報告する
-- [ ] Opportunity重複排除が機能する
-- [ ] cooldown中のOpportunityへ新規Experimentを作らない
+- [ ] Opportunity dedupeが `identity`（`scopeKey`+`intentKey`）単位で機能し、同一ページの異なるintentのOpportunityが共存できることをtestで示す（[§6.1](#61-opportunity)）
+- [ ] `rejected` なOpportunityが明示的reopenなしに自動再浮上しないことをtestで示す
+- [ ] Active experiment guardが機能する: 同一Opportunityに`proposed`/`approved`/`applied`/`observing`のExperimentがある間、新規Experiment作成（`--opportunity-id`直接指定を含む）が拒否される
 - [ ] `experiments.json`/`opportunities.json` の `history[]` がappend-only
 - [ ] `rank-history.json` のappend-only保証が維持されている（現行testを流用）
+- [ ] `before` snapshotが `MeasurementPlan.targetPages`/`targetQueries` のscopeに基づいて算出され、scope外のページ/クエリの数値が混入しないことをfixture testで示す（[§6.5.3](#653-beforeafterの算出ルールscopedata-laginsufficient_data)）
+- [ ] `minimumImpressions` 未達時に `insufficient_data` となり `no_effect` と混同されないことをtestで示す
 - [ ] dry-runで永続ファイルのmutationがゼロ
 - [ ] search resultを外部fileから注入可能（`--serp-file`、現行のまま）
-- [ ] hypothesis/opportunitiesを外部fileから注入可能
+- [ ] hypothesis/opportunities/measurementPlanを外部fileから注入可能
 - [ ] report生成
 - [ ] secret guard
 - [ ] README / SKILL.md 更新
+
+### 19.2 Milestone 1B — rakusetsu.com live read-only validation（明示的に許可された後にのみ実行）
+
+Milestone 1Aの完了後、**ユーザーが明示的に許可したタイミングでのみ**実行する運用上の検証フェーズ。ここで初めて「Cが実サイトを理解して有用なOpportunityを見つけられるか」を評価する。コード変更を伴わない。
+
+- [ ] `rakusetsu.com` をHTTP read-onlyで取得できる（sitemap優先、無ければ浅いクロールにフォールバック）
+- [ ] GSCが設定されていればread-only取得できる（未設定でも `understand` は完走する）
+- [ ] `site-understanding.json` が生成される
+- [ ] Opportunity discoveryが実行され、意味のある候補が得られる
+- [ ] prioritizeが妥当な順位を出す
+- [ ] proposalのMarkdown reportが生成される
+- [ ] `rakusetsu.com`・そのソースリポジトリ・本番環境へのmutationが0件であることを確認する
+- [ ] 生成された初回proposalを人間がレビューする（品質判断はここで行い、Milestone 2投資の可否を決める）
+
+Milestone 1Bの実行そのものが「本番不可逆変更」や「secret/外部アカウント設定」に該当するため、[§0](#0-実装指示実装開始が許可された時点で有効)のユーザー確認ルールにより、実装agentが独断で着手してはならない。
 
 ---
 
@@ -825,16 +983,21 @@ theme + available assets
 - `store.test`（新規スキーマでのjson-store読み書き、旧を継承）
 - `fs-lock.test`（現行のまま再利用可）
 - `gsc-normalize.test` → `gsc-query-page-matrix.test`（query+page dimensionへの変更に合わせて改名・改修）
-- `site-reader.test`（HttpSiteReaderAdapterのsitemapパース、クロール上限、テキスト抽出。fixture HTMLを使う）
-- `opportunity-dedupe.test`（同一scopeのOpportunity重複排除）
-- `prioritize.test`（bucket優先順位、cooldown除外、旧`select-keyword.test`の設計を踏襲）
-- `experiment-lifecycle.test`（status遷移の許可/禁止、historyのappend-only）
+- `site-reader.test`（HttpSiteReaderAdapterのsitemapパース、クロール上限、テキスト抽出、excerpt切り詰め+contentHash算出。fixture HTMLを使う）
+- `opportunity-dedupe.test`: 以下を満たすことを検証する
+  - 同一 `identity`（`scopeKey`+`intentKey`）のOpportunityは重複作成されない（evidence追記のみ）
+  - 同一 `scopeKey` でも `intentKey` が異なれば別Opportunityとして共存する（同一ページに複数Opportunity）
+  - `status: 'promoted'` のOpportunityと同一identityの再提示はスキップされ、reportに記載される
+  - `status: 'rejected'` のOpportunityは `reopen: true` + 理由が無い限り再浮上しない。理由付きなら `open` に戻り `reopened` イベントが追記される
+- `prioritize.test`（[§10.4](#104-prioritize)のbucket 1〜5とtie breakerを固定入力で検証。旧`select-keyword.test`の設計を踏襲するが、position値は判断材料に使わない）
+- `experiment-lifecycle.test`: status遷移の許可/禁止、historyのappend-only、**Active experiment guard**（同一opportunityIdに非終端状態のExperimentがある間、新規作成が拒否されること。`--opportunity-id`直接指定でも拒否されること）、`concluded`/`rejected`到達時にOpportunityが自動的に`open`へ戻ること（`released`イベント）
+- `measurement-plan.test`: `MeasurementPlan.targetPages`/`targetQueries` にscopeした `before` snapshotが、scope外のページ/クエリを含まないことをfixture rank-historyで検証。`minimumImpressions` 未達時に `insufficient_data` となり `no_effect` と区別されることも検証
 - `dry-run.test`（現行の設計を踏襲、対象コマンドを新CLIに合わせる）
-- `e2e-fixture.test`（fixtureサイト+fixture GSCデータで `understand -> discover -> prioritize -> propose` が一周し、reportが生成されることを確認）
+- `e2e-fixture.test`（fixtureサイト+fixture GSCデータで `understand -> discover -> prioritize -> propose` が一周し、reportが生成されることを確認。Milestone 1Aの範囲であり `rakusetsu.com` へは一切アクセスしない）
 
 ---
 
-## 21. 実装順序（Milestone 1、Codexが実装時に迷わないための骨子）
+## 21. 実装順序（Milestone 1A、Codexが実装時に迷わないための骨子）
 
 ### Phase 1: ドメイン型 + persistence
 
@@ -892,8 +1055,11 @@ theme + available assets
 | dry-run / atomic write / lock / append-only history | 変更なし（対象ファイルが増えるのみ） | 完全再利用 |
 | insufficient_data判定 | `ReviewOutcome`に統合して維持 | 再利用 |
 | fixture E2E | 新ワークフロー向けに再構築するが方針は同じ | 再利用（設計方針） |
-| 「1 run 1 keyword」 | 「1 discover/propose あたりの提案数上限」 | 一般化 |
+| 「1 run 1 keyword」 | 「1 discover/propose あたりの提案数上限」+ Active experiment guard | 一般化 |
 | Skill (`seo-rank-watch`) | 新Skillへ改名・改修（意味理解/AI担当の分離は維持） | 改修 |
+| （新規）`OpportunityIdentity`（`scopeKey`+`intentKey`） | dedupeキー。同一ページの複数Opportunity共存を許容 | 新規 |
+| （新規）`MeasurementPlan` | before/afterのscope・primary metric・sufficient-data条件を固定 | 新規 |
+| `PageSummary`（title/headings/wordCountのみ） | `PageSnapshot`（+bounded excerpt, contentHash） | 拡張（本文の根拠を保持） |
 
 ---
 

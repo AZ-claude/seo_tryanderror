@@ -1,4 +1,4 @@
-# IMPLEMENTATION_GOAL — seo_tryanderror Milestone 1
+# IMPLEMENTATION_GOAL — seo_tryanderror Milestone 1A
 
 最終更新: 2026-09-18
 対象: 実装を開始するcoding agent（Codex/Claude等）
@@ -6,13 +6,19 @@
 ## これは何か
 
 このドキュメントは、`DESIGN.md`（正本）と `HANDOFF.md`（背景説明）を読んだ実装agentに渡す、
-Milestone 1のための短い着手用ゴール文書。**このドキュメント自体は仕様の詳細を持たない**。
+**Milestone 1A（Implementation qualification）**のための短い着手用ゴール文書。
+**このドキュメント自体は仕様の詳細を持たない**。
 迷ったら必ず `DESIGN.md` → `HANDOFF.md` → YAGNI → fixture/stubで前進、の順で解決すること。
 
-## Milestone 1のゴール（1文で）
+V1はMilestone 1A/1Bの2段階に分かれる（`DESIGN.md` §19）。**このagentが実装・完了させるのは1Aのみ**であり、
+1B（`rakusetsu.com`へのlive read-onlyアクセスによる運用検証）はこのagentのDefinition of Doneに含まれない。
+1Bはユーザーが別途明示的に許可した上で実行する、コード変更を伴わない検証作業である。
 
-`rakusetsu.com` を read-only で理解し、Opportunityを発見し、優先順位をつけ、次に試す施策を
-`Experiment(status: proposed)` として提案・reportできる状態を、fixtureデータで再現可能な形で実装する。
+## Milestone 1Aのゴール（1文で）
+
+Opportunityを発見し、優先順位をつけ、次に試す施策を `Experiment(status: proposed)` として
+提案・reportできる状態を、**fixtureデータのみで**再現可能な形で実装する。`rakusetsu.com` を含む
+実サイト・実GSCへは一切アクセスしない。
 
 ## やること
 
@@ -32,10 +38,11 @@ Milestone 1のための短い着手用ゴール文書。**このドキュメン�
 - Bootstrap Modeの自動化（`discover`がtheme入力を受け付ける設計フックのみ）
 - `rakusetsu.com` や他repoへの実際のアクセス（credential/URLは環境変数・configで注入できる形にし、
   実際の接続確認はこのagentの作業範囲外。fixtureで完結させる）
+- Milestone 1B（`rakusetsu.com`のlive read-only検証）そのもの——これは実装完了後に別途ユーザーが許可する運用検証であり、このagentのタスクではない
 
 ## Definition of Done
 
-`DESIGN.md` §19 Acceptance Criteria を全て満たすこと。特に:
+`DESIGN.md` §19.1（Milestone 1A — Implementation qualification）の全項目を満たすこと。§19.2（Milestone 1B）はこのagentのDefinition of Doneに含まれない。特に:
 
 - `npm install && npm test && npm run build` が通る
 - `npm run seo -- understand --fixture --date <date>` から
@@ -65,7 +72,11 @@ Tests:
 - npm run build: PASS/FAIL
 - fixture E2E (understand->discover->prioritize->propose): PASS/FAIL
 
-External setup remaining:
+Milestone 1A scope only. Milestone 1B (live read-only validation against
+rakusetsu.com) requires separate, explicit user authorization and is not
+part of this report.
+
+External setup remaining (for Milestone 1B, not this agent's task):
 - GSC credential for rakusetsu.com: ...
 - rakusetsu.com base URL / crawl config: ...
 
