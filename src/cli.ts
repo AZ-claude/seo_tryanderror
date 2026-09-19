@@ -170,6 +170,7 @@ export async function cmdUnderstand(flags: Flags): Promise<number> {
     gscProperty: config.gsc.property,
     today,
     dryRun,
+    maxPages: config.site.maxPages,
     understandingOverride,
     gscWindowDays: config.gsc.defaultWindowDays,
     finalDataLagDays: config.gsc.finalDataLagDays,
