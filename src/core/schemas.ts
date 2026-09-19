@@ -272,6 +272,7 @@ export const seoConfigSchema = z.object({
     reader: z.enum(['http', 'filesystem']),
     repoRoot: z.string().nullable(),
     contentRoot: z.string().nullable(),
+    maxPages: z.number().int().positive().optional(),
   }),
   gsc: z.object({
     property: z.string().min(1),

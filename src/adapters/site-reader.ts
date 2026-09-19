@@ -64,14 +64,37 @@ export class HttpSiteReaderAdapter implements SiteReaderAdapter {
     return disallow.some((rule) => rule !== '' && path.startsWith(rule));
   }
 
+  /**
+   * Resolves a sitemap URL to page URLs, following one level of sitemap-index
+   * nesting (e.g. Astro/WordPress split sitemaps: sitemap-index.xml ->
+   * sitemap-0.xml). Sub-sitemap fetches are capped to avoid unbounded fan-out.
+   */
+  private async resolveSitemapPages(sitemapXml: string): Promise<string[] | null> {
+    if (/<sitemapindex[\s>]/i.test(sitemapXml)) {
+      const subSitemapUrls = extractSitemapLocs(sitemapXml).slice(0, 10);
+      const pages: string[] = [];
+      for (const subUrl of subSitemapUrls) {
+        const subXml = await this.fetchText(subUrl);
+        if (subXml) pages.push(...extractSitemapLocs(subXml));
+      }
+      return pages.length > 0 ? pages : null;
+    }
+    const locs = extractSitemapLocs(sitemapXml);
+    return locs.length > 0 ? locs : null;
+  }
+
   async listPages(): Promise<Array<{ path: string; source: 'sitemap' | 'crawl' }>> {
     const maxPages = this.options.maxPages ?? DEFAULT_MAX_PAGES;
     const disallow = await this.loadRobotsDisallow();
 
-    const sitemapUrl = new URL('/sitemap.xml', this.options.baseUrl).toString();
-    const sitemapXml = await this.fetchText(sitemapUrl);
-    if (sitemapXml) {
-      const urls = extractSitemapLocs(sitemapXml).filter((u) => !this.isDisallowed(u, disallow));
+    const sitemapCandidates = ['/sitemap.xml', '/sitemap-index.xml'];
+    for (const candidate of sitemapCandidates) {
+      const sitemapUrl = new URL(candidate, this.options.baseUrl).toString();
+      const sitemapXml = await this.fetchText(sitemapUrl);
+      if (!sitemapXml) continue;
+      const resolved = await this.resolveSitemapPages(sitemapXml);
+      if (!resolved) continue;
+      const urls = resolved.filter((u) => !this.isDisallowed(u, disallow));
       return urls.slice(0, maxPages).map((path) => ({ path, source: 'sitemap' as const }));
     }
 

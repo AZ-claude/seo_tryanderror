@@ -116,7 +116,7 @@ async function loadFixtureGscAdapter(rootDir: string): Promise<GscAdapter> {
   return new FixtureGscAdapter(rows as GscSummaryRow[]);
 }
 
-function buildSiteReader(config: SeoConfig, opts: { fixtureMode: boolean; fixturePages: FixturePage[] }): SiteReaderAdapter {
+export function buildSiteReader(config: SeoConfig, opts: { fixtureMode: boolean; fixturePages: FixturePage[] }): SiteReaderAdapter {
   if (opts.fixtureMode || config.adapters.site === 'fixture') {
     return new FixtureSiteReaderAdapter(opts.fixturePages);
   }
@@ -124,7 +124,7 @@ function buildSiteReader(config: SeoConfig, opts: { fixtureMode: boolean; fixtur
     if (!config.site.contentRoot) throw new Error('site.contentRoot is required for adapters.site="filesystem-readonly"');
     return new FilesystemSiteReaderAdapter(config.site.contentRoot);
   }
-  return new HttpSiteReaderAdapter({ baseUrl: config.site.baseUrl });
+  return new HttpSiteReaderAdapter({ baseUrl: config.site.baseUrl, maxPages: config.site.maxPages });
 }
 
 function reportFileName(now = new Date()): string {

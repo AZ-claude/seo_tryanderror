@@ -327,6 +327,7 @@ export type SeoConfig = {
     reader: 'http' | 'filesystem';
     repoRoot: string | null;
     contentRoot: string | null;
+    maxPages?: number;
   };
   gsc: {
     property: string;

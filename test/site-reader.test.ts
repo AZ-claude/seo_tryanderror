@@ -37,6 +37,16 @@ test('HttpSiteReaderAdapter: sitemap listPages is capped by maxPages', async () 
   assert.equal(pages.length, 1);
 });
 
+test('HttpSiteReaderAdapter: falls back to sitemap-index.xml and follows its sub-sitemap when sitemap.xml is missing', async () => {
+  const root = join(REPO_ROOT, 'fixtures/html/sitemap-index-site');
+  const adapter = new HttpSiteReaderAdapter({ baseUrl: 'http://fixture.test', fetchImpl: fixtureFetch(root) });
+
+  const pages = await adapter.listPages();
+  const paths = pages.map((p) => p.path);
+  assert.deepEqual(paths.sort(), ['http://fixture.test/a.html', 'http://fixture.test/b.html']);
+  assert.ok(pages.every((p) => p.source === 'sitemap'));
+});
+
 test('HttpSiteReaderAdapter: readPage extracts title, headings and body text', async () => {
   const root = join(REPO_ROOT, 'fixtures/html/sitemap-site');
   const adapter = new HttpSiteReaderAdapter({ baseUrl: 'http://fixture.test', fetchImpl: fixtureFetch(root) });
