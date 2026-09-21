@@ -1,7 +1,32 @@
-// Date helpers. All dates are plain 'YYYY-MM-DD' strings, UTC-based, no time component.
+// Date helpers. All dates are plain 'YYYY-MM-DD' strings.
+// Calendar-date *arithmetic* below (addDays/diffDays/parseDate/formatDate)
+// stays UTC-based — it only ever operates on already-resolved YYYY-MM-DD
+// strings, not on the current instant, so there is nothing timezone-ish
+// about it. The one place "what day is it right now" actually gets decided
+// is todayString(); operators, the site, and the Windows ops machine all
+// run on JST, so that single entry point resolves against Asia/Tokyo
+// (Node's built-in Intl.DateTimeFormat, no external timezone library).
 
+const OPERATIONAL_TIMEZONE = 'Asia/Tokyo';
+const jstDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: OPERATIONAL_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** Pure, instant-injectable: the Asia/Tokyo calendar date for a given instant, as YYYY-MM-DD. */
+export function toOperationalDateString(instant: Date): string {
+  // en-CA's formatToParts gives numeric fields we can reassemble losslessly,
+  // rather than relying on the locale's en-CA output ordering.
+  const parts = jstDateFormatter.formatToParts(instant);
+  const get = (type: string) => parts.find((p) => p.type === type)!.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/** "What day is it, operationally" — Asia/Tokyo, not UTC and not the host machine's local zone. */
 export function todayString(): string {
-  return new Date().toISOString().slice(0, 10);
+  return toOperationalDateString(new Date());
 }
 
 export function parseDate(date: string): Date {
