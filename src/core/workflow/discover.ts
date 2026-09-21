@@ -1,27 +1,59 @@
 import { acquireLock } from '../../infra/fs-lock.js';
-import { loadOpportunities, loadSiteUnderstanding, saveOpportunities } from '../../infra/json-store.js';
+import { loadOpportunities, loadRankHistory, loadSiteUnderstanding, saveOpportunities } from '../../infra/json-store.js';
 import { isIntentSlugTooCloseToTitle, mergeDiscoveredOpportunity } from '../opportunity.js';
 import { generateDiscoverReport } from '../report.js';
-import type { DiscoverOpportunityInput, Opportunity, SiteUnderstanding } from '../types.js';
+import type { DiscoverOpportunityInput, GscSummaryRow, Opportunity, RankHistoryEntry, SiteUnderstanding } from '../types.js';
 
 export type DiscoverPaths = {
   siteUnderstanding: string;
   opportunities: string;
   lock: string;
+  rankHistory: string;
+};
+
+const MAX_GSC_EVIDENCE_ROWS = 500;
+
+export type GscEvidence = {
+  window?: { start: string; end: string; days: number };
+  rows: GscSummaryRow[];
 };
 
 export type DiscoverDumpResult = {
   siteUnderstanding: SiteUnderstanding;
+  gscEvidence?: GscEvidence;
   existingOpportunityIdentities: Array<{ id: string; scopeKey: string; intentKey: string; kind: string; title: string }>;
   bootstrapModeSuggested: boolean;
 };
+
+/**
+ * Bounded, unfiltered query×page evidence from the most recent GSC
+ * rank-history snapshot (DESIGN.md 10.3). Unlike
+ * siteUnderstanding.gscSummary.topQueries (which applies an impressions
+ * floor for the persisted understanding report), this keeps every row —
+ * including 1-9 impression queries — since low-traffic sites need those as
+ * discovery signal. Never mixes snapshots or non-'gsc' sources.
+ */
+async function loadGscEvidence(rankHistoryPath: string): Promise<GscEvidence | undefined> {
+  const history = await loadRankHistory(rankHistoryPath);
+  return buildGscEvidence(history.entries);
+}
+
+export function buildGscEvidence(entries: RankHistoryEntry[]): GscEvidence | undefined {
+  const gscEntries = entries.filter((e) => e.source === 'gsc');
+  if (gscEntries.length === 0) return undefined;
+  const latest = gscEntries.reduce((a, b) => (b.date > a.date ? b : a));
+  const rows = [...latest.rows].sort((a, b) => b.impressions - a.impressions).slice(0, MAX_GSC_EVIDENCE_ROWS);
+  return { window: latest.window, rows };
+}
 
 /** `discover --dump-inputs`: structured material for the Skill, no persistence (DESIGN.md 10.3). */
 export async function dumpDiscoverInputs(paths: DiscoverPaths): Promise<DiscoverDumpResult> {
   const siteUnderstanding = await loadSiteUnderstanding(paths.siteUnderstanding);
   const opportunities = await loadOpportunities(paths.opportunities);
+  const gscEvidence = await loadGscEvidence(paths.rankHistory);
   return {
     siteUnderstanding,
+    ...(gscEvidence ? { gscEvidence } : {}),
     existingOpportunityIdentities: opportunities.map((o) => ({
       id: o.id,
       scopeKey: o.identity.scopeKey,
