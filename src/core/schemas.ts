@@ -332,3 +332,41 @@ export const proposeInputSchema = z.object({
   action: actionSchema,
   measurementPlan: measurementPlanSchema,
 });
+
+/**
+ * `apply --evidence-file` (Milestone 2 minimal REVISE-only apply, DESIGN.md
+ * 10.6/13). Records what a human/AI-assisted session already did directly in
+ * the site repo (edit, B review, test/build, commit, deploy, live check) so
+ * it can be validated and turned into an append-only Experiment history
+ * (proposed -> approved -> applied -> observing). This is not a generalized
+ * SiteWriter/NaturalWriter executor — see DESIGN.md 9.6 for that future
+ * scope.
+ */
+export const applyEvidenceSchema = z.object({
+  targetPage: z.string().min(1),
+  siteRepo: z.string().min(1),
+  changedFiles: z.array(z.string().min(1)).min(1),
+  actionSummary: z.string().min(1),
+  commitSha: z.string().min(1),
+  commitBranch: z.string().min(1),
+  bReview: z.object({
+    tool: z.string().min(1),
+    claimPreservation: z.object({
+      preserved: z.number().nonnegative(),
+      modified: z.number().nonnegative(),
+      invented: z.number().nonnegative(),
+    }),
+  }),
+  siteValidation: z.object({
+    lintContent: z.string().min(1),
+    build: z.string().min(1),
+  }),
+  deployMethod: z.string().min(1),
+  liveVerification: z.object({
+    httpStatus: z.number(),
+    sectionPresent: z.boolean(),
+    existingSectionsIntact: z.array(z.string().min(1)),
+    canonicalUnchanged: z.boolean(),
+    noindexUnchanged: z.boolean(),
+  }),
+});

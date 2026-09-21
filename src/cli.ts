@@ -6,10 +6,11 @@ import { loadSerpFromFile } from './adapters/search.js';
 import { FixtureSiteReaderAdapter, HttpSiteReaderAdapter, FilesystemSiteReaderAdapter } from './adapters/site-reader.js';
 import type { FixturePage } from './adapters/site-reader.js';
 import { todayString } from './core/date.js';
-import { discoverInputFileSchema, gscSummaryRowSchema, proposeInputSchema, seoConfigSchema } from './core/schemas.js';
+import { applyEvidenceSchema, discoverInputFileSchema, gscSummaryRowSchema, proposeInputSchema, seoConfigSchema } from './core/schemas.js';
 import { prioritizeOpportunities } from './core/prioritize.js';
 import { generatePrioritizeReport, generateStatusReport } from './core/report.js';
 import { getStatusView } from './core/status.js';
+import { runApply } from './core/workflow/apply.js';
 import { dumpDiscoverInputs, runDiscover } from './core/workflow/discover.js';
 import { runPropose } from './core/workflow/propose.js';
 import { runUnderstand } from './core/workflow/understand.js';
@@ -257,6 +258,31 @@ export async function cmdPropose(flags: Flags): Promise<number> {
   return result.exitCode;
 }
 
+export async function cmdApply(flags: Flags): Promise<number> {
+  const dryRun = Boolean(flags['dry-run']);
+  const today = flagString(flags, 'date') ?? todayString();
+  const paths = resolveDataPaths(process.cwd(), false);
+
+  const experimentId = flagString(flags, 'experiment-id');
+  const evidenceFile = flagString(flags, 'evidence-file');
+  if (!experimentId || !evidenceFile) {
+    console.error('apply requires --experiment-id <id> --evidence-file <path>');
+    return 1;
+  }
+  const evidence = await readJsonFile(evidenceFile, applyEvidenceSchema);
+
+  const result = await runApply(paths, {
+    experimentId,
+    evidence,
+    today,
+    now: new Date().toISOString(),
+    dryRun,
+  });
+
+  await writeReport(result.report, dryRun || result.exitCode !== 0);
+  return result.exitCode;
+}
+
 export async function cmdStatus(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const today = flagString(flags, 'date') ?? todayString();
@@ -286,11 +312,14 @@ async function main(): Promise<void> {
     case 'propose':
       exitCode = await cmdPropose(flags);
       break;
+    case 'apply':
+      exitCode = await cmdApply(flags);
+      break;
     case 'status':
       exitCode = await cmdStatus(flags);
       break;
     default:
-      console.error(`unknown command: "${command}"\nusage: seo <understand|discover|prioritize|propose|status> [options]`);
+      console.error(`unknown command: "${command}"\nusage: seo <understand|discover|prioritize|propose|apply|status> [options]`);
       exitCode = 1;
   }
   process.exitCode = exitCode;

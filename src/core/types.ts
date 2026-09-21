@@ -375,6 +375,30 @@ export type ProposeInput = {
   measurementPlan: MeasurementPlan;
 };
 
+// --- apply evidence (Skill/human -> CLI, Milestone 2 minimal REVISE-only apply) ---
+
+export type ApplyEvidence = {
+  targetPage: string;
+  siteRepo: string;
+  changedFiles: string[];
+  actionSummary: string;
+  commitSha: string;
+  commitBranch: string;
+  bReview: {
+    tool: string;
+    claimPreservation: { preserved: number; modified: number; invented: number };
+  };
+  siteValidation: { lintContent: string; build: string };
+  deployMethod: string;
+  liveVerification: {
+    httpStatus: number;
+    sectionPresent: boolean;
+    existingSectionsIntact: string[];
+    canonicalUnchanged: boolean;
+    noindexUnchanged: boolean;
+  };
+};
+
 // --- status view (DESIGN.md section 11) ---
 
 export type StatusView = {
