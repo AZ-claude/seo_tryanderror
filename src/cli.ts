@@ -6,19 +6,29 @@ import { loadSerpFromFile } from './adapters/search.js';
 import { FixtureSiteReaderAdapter, HttpSiteReaderAdapter, FilesystemSiteReaderAdapter } from './adapters/site-reader.js';
 import type { FixturePage } from './adapters/site-reader.js';
 import { todayString } from './core/date.js';
-import { applyEvidenceSchema, discoverInputFileSchema, gscSummaryRowSchema, proposeInputSchema, seoConfigSchema } from './core/schemas.js';
+import {
+  applyEvidenceSchema,
+  discoverInputFileSchema,
+  gscSummaryRowSchema,
+  proposeInputSchema,
+  reviewDecisionInputSchema,
+  seoConfigSchema,
+} from './core/schemas.js';
 import { prioritizeOpportunities } from './core/prioritize.js';
 import { generatePrioritizeReport, generateStatusReport } from './core/report.js';
 import { getStatusView } from './core/status.js';
 import { runApply } from './core/workflow/apply.js';
 import { dumpDiscoverInputs, runDiscover } from './core/workflow/discover.js';
 import { runPropose } from './core/workflow/propose.js';
+import { dumpReviewInputs, runReviewDecision } from './core/workflow/review.js';
 import { runUnderstand } from './core/workflow/understand.js';
 import type { GscAdapter, GscSummaryRow, SeoConfig, SiteReaderAdapter } from './core/types.js';
 import { loadExperiments, loadOpportunities, readJsonFile } from './infra/json-store.js';
 import { z } from 'zod';
 
 export type Flags = Record<string, string | boolean>;
+
+const DEFAULT_MAX_ACTIVE_EXPERIMENTS = 3;
 
 export function parseArgs(argv: string[]): { command: string; flags: Flags } {
   const [command, ...rest] = argv;
@@ -250,6 +260,7 @@ export async function cmdPropose(flags: Flags): Promise<number> {
     now: new Date().toISOString(),
     finalDataLagDays: config.gsc.finalDataLagDays,
     metricsSource: fixtureMode ? 'fixture' : 'gsc',
+    maxActiveExperiments: config.experiment.maxActiveExperiments ?? DEFAULT_MAX_ACTIVE_EXPERIMENTS,
     serp,
     dryRun,
   });
@@ -276,6 +287,60 @@ export async function cmdApply(flags: Flags): Promise<number> {
     evidence,
     today,
     now: new Date().toISOString(),
+    dryRun,
+  });
+
+  await writeReport(result.report, dryRun || result.exitCode !== 0);
+  return result.exitCode;
+}
+
+export async function cmdReview(flags: Flags): Promise<number> {
+  const fixtureMode = Boolean(flags.fixture);
+  const dryRun = Boolean(flags['dry-run']);
+  const configPath = flagString(flags, 'config') ?? (fixtureMode ? 'config/seo.config.example.json' : 'config/seo.config.json');
+  const config = await loadConfig(configPath);
+  const today = flagString(flags, 'date') ?? todayString();
+  const now = new Date().toISOString();
+
+  const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false);
+
+  const experimentId = flagString(flags, 'experiment-id');
+  if (!experimentId) {
+    console.error('review requires --experiment-id <id> (with --dump-inputs, or --review-file <path>)');
+    return 1;
+  }
+  const gsc: GscAdapter = fixtureMode
+    ? await loadFixtureGscAdapter(process.cwd())
+    : new RealGscAdapter(config.gsc.credentialsEnv);
+
+  if (flags['dump-inputs']) {
+    const experiments = await loadExperiments(paths.experiments);
+    const dumped = await dumpReviewInputs(experiments, gsc, {
+      experimentId,
+      property: config.gsc.property,
+      today,
+      finalDataLagDays: config.gsc.finalDataLagDays,
+      now,
+    });
+    console.log(JSON.stringify(dumped, null, 2));
+    return 'error' in dumped ? 1 : 0;
+  }
+
+  const reviewFile = flagString(flags, 'review-file');
+  if (!reviewFile) {
+    console.error('review requires --dump-inputs or --review-file <path>');
+    return 1;
+  }
+  const decisionInput = await readJsonFile(reviewFile, reviewDecisionInputSchema);
+
+  const result = await runReviewDecision(paths, gsc, {
+    experimentId,
+    property: config.gsc.property,
+    today,
+    finalDataLagDays: config.gsc.finalDataLagDays,
+    now,
+    decisionInput,
     dryRun,
   });
 
@@ -315,11 +380,14 @@ async function main(): Promise<void> {
     case 'apply':
       exitCode = await cmdApply(flags);
       break;
+    case 'review':
+      exitCode = await cmdReview(flags);
+      break;
     case 'status':
       exitCode = await cmdStatus(flags);
       break;
     default:
-      console.error(`unknown command: "${command}"\nusage: seo <understand|discover|prioritize|propose|apply|status> [options]`);
+      console.error(`unknown command: "${command}"\nusage: seo <understand|discover|prioritize|propose|apply|review|status> [options]`);
       exitCode = 1;
   }
   process.exitCode = exitCode;

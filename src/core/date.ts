@@ -22,6 +22,12 @@ export function addDays(date: string, days: number): string {
   return formatDate(d);
 }
 
+/** Number of days from `a` to `b` (positive when b is after a). */
+export function diffDays(a: string, b: string): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.round((parseDate(b).getTime() - parseDate(a).getTime()) / msPerDay);
+}
+
 /** -1 if a < b, 0 if equal, 1 if a > b */
 export function compareDates(a: string, b: string): -1 | 0 | 1 {
   if (a < b) return -1;

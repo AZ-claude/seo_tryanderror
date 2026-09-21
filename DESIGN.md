@@ -629,8 +629,6 @@ interface ActionExecutor {
 ### 10.1 全体像
 
 ```text
-READ
-  ↓
 UNDERSTAND
   ↓
 DISCOVER
@@ -638,15 +636,24 @@ DISCOVER
 PRIORITIZE
   ↓
 PROPOSE
-  ↓  ← V1 Milestone 1 はここまで
-PR作成
   ↓
-test
+B
   ↓
-review（人間）
+APPLY / deploy
   ↓
-publish            ← Milestone 2以降
+OBSERVE
+  ↓
+REVIEW（checkpoint: 3 / 7 / 14 / 28日）
+  ↓
+conclude可能 → LEARN → Opportunity release
+conclude不可 → observe継続
+  ↓
+repeat（毎日。複数Experimentを並行観測しながら回す — 1件のExperimentが
+        28日終わるのを待って次に進む、という直列運用はしない）
 ```
+
+**現在の実装状態（更新履歴の概要。詳細は各節）:**
+`understand -> discover -> prioritize -> propose` は当初のMilestone 1の範囲どおり実装済み。続けて、実サイト（rakusetsu.com）への最初のREVISE適用一式（`apply`、B連携、rolling checkpoint review、`concluded`後のOpportunity release、`discover`への `experimentMemory`、並行Experiment向けのpage衝突ガード・最大並行数ガード）も実装済み（[§10.6](#106-apply-実装済みmilestone-2最小スコープ)、[§10.7](#107-rolling-checkpoint-review実装済み)）。当初「Milestone 1はここで終わる、B呼び出し・apply・PR作成は行わない」としていた記述は、最初の1件を人間の明示許可のもとで手動運用として実施した際の暫定境界であり、現在はその先（apply/review/conclude/並行実行）までコードとして存在する。ただし **scheduler化（Windows Task Scheduler等への自動登録、無人での毎日実行）はまだ行っていない** — 1 daily cycleは手動、またはClaude Codeの `seo-growth-loop` Skill経由での起動を前提とする（[§14 将来](#14-将来的な拡張任意)相当）。
 
 `READ`/`UNDERSTAND` を1コマンドに統合し(`seo understand`)、以降は分離する。決定論的コード（state管理・履歴・重複防止・遷移制御）とAI（意味理解・仮説生成）の分離という現行設計の核は維持する: **状態遷移と永続化はcore、意味理解と仮説はSkill（呼び出し元のcoding agent）が担当**。
 
@@ -727,17 +734,48 @@ npm run seo -- propose --config config/seo.config.json \
 5. Opportunityを `status: 'promoted'` に更新し、`history` に `promoted` eventを追記
 6. Markdown report（`reports/YYYY-MM-DD-HHMMSS.md`）を生成。**これがMilestone 1における最終成果物**。サイトへの書き込みは一切発生しない
 
-**V1 Milestone 1はここで終わる。** サイトへのapply、B呼び出し、PR作成は行わない。
+**当初のMilestone 1はここで終わっていた。** サイトへのapply、B呼び出し、PR作成は最初は行わなかった。最初の1件（rakusetsu.com `/pokemon-box-price/`）は人間の明示許可のもとで実施し、その過程で必要になった最小限のMilestone 2実装（`apply` CLI、rolling checkpoint review）を後追いでコードとして固定した（[§10.6](#106-apply-実装済みmilestone-2最小スコープ)、[§10.7](#107-rolling-checkpoint-review実装済み)）。
 
-### 10.6 将来: apply mode（Milestone 2以降）
+### 10.6 apply（実装済み、Milestone 2最小スコープ）
 
 ```bash
-npm run seo -- apply --config config/seo.config.json --experiment-id <id>
+npm run seo -- apply --config config/seo.config.json \
+  --experiment-id <id> --evidence-file <path> [--dry-run]
 ```
 
-旧 `runSeoLoop` のtransaction semantics（[§13](#13-transaction-semanticsmilestone-2向け設計として確定させておく)）をそのまま踏襲し、`Action.type === 'REVISE'` のExperimentのみ実行可能にする。成功時は `status: 'applied'` → 観察期間設定で `status: 'observing'`。この時点でもリポジトリへの直接pushは行わず、**ブランチ作成+diff提示（PR相当）までをCLIまたはSkillの責務とし、mergeは人間が行う**。「本番への直接pushは初期V1では不要」という要求を、Milestone 2に入ってもなお守る設計とする。
+`src/core/workflow/apply.ts`。`Action.type === 'REVISE'` かつ `status: 'proposed'` のExperimentのみ受け付ける（CREATE/MERGE/SPLIT/RETIRE、および汎用のクロスリポジトリSiteWriter/NaturalWriter実行器はまだ実装しない——[§9.6](#96-action-executor実行器)のNotImplementedActionExecutorのまま）。
 
-観察期間終了後（`observation.nextReviewDate` 到達後）のレビューでは、`after` snapshotを `before` と同じ `measurementPlan` のscope・windowルール（[§6.5.3](#653-beforeafterの算出ルールscopedata-laginsufficient_data)）で算出し、`Experiment.status` を `concluded` にする。この時点でOpportunityは自動的に `open` へ戻る（`released` イベント、[§6.1.2](#612-本体)）。
+このコマンド自身は対象サイトのリポジトリを編集したりBを呼んだりしない。サイト側の編集・B（`seo_japanese`）でのreview・lint/build・commit・deployは、Skill（またはそれを呼び出す人間）が対象サイトのリポジトリで直接行う。`apply` はその結果を構造化evidence（`ApplyEvidence`: 対象ページ、commit SHA、B の `claim_preservation`、site validation結果、live verification結果）として受け取り、検証したうえで**既存の** `transitionExperiment()` 状態機械（Milestone 1時点で実装済み、これまで未使用だった）を使って `proposed -> approved -> applied -> observing` へappend-onlyで進める。`observation.start`/`end`/`nextReviewDate` は `measurementPlan.reviewWindowDays` から機械的に算出する。
+
+「リポジトリへの直接pushは行わず、ブランチ作成+diff提示までをCLIの責務とし、mergeは人間が行う」という当初の設計は、**最初の1件については人間が対象サイトのリポジトリで直接commit/pushする運用（ユーザーの明示許可あり）に変わっている。** 汎用のPR自動作成・自動push機構はまだ実装していない。
+
+### 10.7 Rolling checkpoint review（実装済み）
+
+28日間隔で1回だけ判定する直列運用ではなく、固定tier `[3, 7, 14, 28]`（`CHECKPOINT_DAYS`）日でのrolling reviewを行う。「見るタイミング」であり「必ず終了するタイミング」ではない——早いtierで十分なsignalが無ければ単に観測を続ける。
+
+**equal-window比較**: `rank-history.json` のtrailing 28日snapshotを早期review（例: 7日目）にそのまま使うと、変更前後で大部分の日数が重複し判定が歪む。そのため `review` は `RealGscAdapter.fetchQueryPageMatrix()`（独自GSC clientは作らない）で毎回**厳密な日付範囲**を直接read-only取得し、before/afterを同じ日数で比較する（`src/core/review.ts` の `computeComparisonWindow`）。`afterStart` は `observation.start + 1日`（deploy当日はafterから除外）、`beforeEnd` は `observation.start` 自身（before/afterは重複しない）、`afterEnd` は `min(observation.start + checkpointDay, today - finalDataLagDays)` でfinal data lagを反映する。
+
+```bash
+npm run seo -- review --config config/seo.config.json \
+  --experiment-id <id> --dump-inputs
+```
+
+read-only。`{ experiment, elapsedDays, checkpoint, comparison: {before, after, delta}, sufficientData, canConclude, metricDirection, note }` を出力する。`checkpoint` は「まだ記録していない最小のtierで、かつobservation開始後のfinal dataが存在する」もの。無ければ `null`（=まだ何もすることがない、no-op）。
+
+意味判断（`hypothesis_supported`/`partially_supported`/`no_effect`/`worse`/`insufficient_data` のどれか）はSkillが行い、`--review-file` で渡す。coreは以下だけを機械的に保証する:
+
+- `minimumImpressions` 未達なら `sufficientData: false`。ただし最終(28日)tierでなければ `decision: 'continue_observing'` に留め、勝手に`insufficient_data`として終了させない。28日tierで未達なら `insufficient_data` としてconclude可能にする
+- `insufficient_data` は `no_effect` と絶対に混同させない（`assertOutcomeConsistentWithCheckpoint` がcore側で強制する）
+- `decision: 'continue_observing'` を送った場合は `ReviewCheckpoint` をExperimentへ追記するだけ（`checkpoints[]`、append-only）で状態遷移はしない
+- `decision: 'conclude'` の場合、checkpointの追記に加えて `after`/`result`/`learning` を保存し、`status: 'concluded'` へ遷移。対応するOpportunityは、**他にそのOpportunityを参照するactiveなExperimentが無ければ** `open` へrelease（[§6.1.2](#612-本体) の `released` イベントをそのまま再利用）
+
+専用の統計的有意性エンジンやBayesian最適化は作らない（YAGNI）。coreが出すのは `before`/`after`/`delta`/`elapsedDays`/`sufficientData`/`metricDirection`（`position` のみlower-is-better）という構造化データのみで、「成功」を決める%閾値は一切発明しない。
+
+### 10.8 並行Experiment・page conflict guard（実装済み）
+
+1つのExperimentのreviewを待ってサイト全体のPDCAを止めない。`config.experiment.maxActiveExperiments`（未指定時3）まで、複数のActiveなExperiment（`proposed`/`approved`/`applied`/`observing`）を並行させてよい。
+
+ただし**同じページに2つ以上のactiveなExperimentを同時に走らせると、効果がどちらの変更によるものか分からなくなる**。そのため `propose` 時、既存のOpportunity単位のactive experiment guard（[§7.3](#73-experimentsjson-のwrite-rule)）に加えて、`Action.targetPaths` / `MeasurementPlan.targetPages` のページscopeが既存のactiveなExperimentと重なっていないかを確認する（`assertNoActivePageConflict`、エラーコード `ACTIVE_PAGE_EXPERIMENT_EXISTS`）。別のOpportunityであっても、同じページを指していればブロックする。異なるページなら常に並行可能。V1ではcluster Opportunity同士のキーワード意味重複検出は行わない（scopeがpageと重ならなければ許可）。
 
 ---
 
@@ -745,16 +783,12 @@ npm run seo -- apply --config config/seo.config.json --experiment-id <id>
 
 ```bash
 npm run seo -- understand --config <path> [--fixture] [--date YYYY-MM-DD]
-npm run seo -- discover --config <path> [--opportunities-file <path>]
+npm run seo -- discover --config <path> [--opportunities-file <path> | --dump-inputs]
 npm run seo -- prioritize --config <path>
 npm run seo -- propose --config <path> --opportunity-id <id> --hypothesis-file <path> [--serp-file <path>] [--dry-run]
+npm run seo -- apply --config <path> --experiment-id <id> --evidence-file <path> [--dry-run]
+npm run seo -- review --config <path> --experiment-id <id> [--dump-inputs | --review-file <path>] [--dry-run]
 npm run seo -- status --config <path>
-```
-
-（将来）
-
-```bash
-npm run seo -- apply --config <path> --experiment-id <id> [--dry-run]
 ```
 
 `status` は旧 `getStatus()` のバケツ分類の思想を維持しつつ、opportunities/experimentsの現況を出す:

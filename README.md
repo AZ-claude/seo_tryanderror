@@ -12,29 +12,46 @@ C → B   = SEO上必要な記事/改善を自然な記事にする(このリポ
 - **A: 作業ログの素材化** — 別リポジトリ(`/kiji`)。このリポジトリは依存しない。
 - **B: 自然な日本語生成** — 別プロジェクト(`seo_japanese`)。事実を変えず自然な
   日本語へ変換する。未接続の間は `StubNaturalWriterAdapter` で代替する。
-  **Milestone 1(このバージョン)ではBは一切呼ばれない**(apply modeが未実装のため)。
+  当初のMilestone 1ではBは一切呼ばれなかったが、`apply`(最初の実サイト適用)を
+  最小実装したことで、そこから先(サイト側の編集・B連携・deploy)は現在は
+  人間/Skillが対象サイトのリポジトリで直接行い、その結果を`apply`が検証・記録
+  する運用になっている(下記「rolling PDCA」参照)。
 - **C: サイト育成の意思決定(このリポジトリ)**
 
 設計の詳細は [DESIGN.md](./DESIGN.md)、背景は [HANDOFF.md](./HANDOFF.md) を参照。
 
-## ワークフロー(Milestone 1: read-only + 提案まで)
+## ワークフロー
 
 ```text
-understand -> discover -> prioritize -> propose
+understand -> discover -> prioritize -> propose -> (B, サイト変更, deploy) -> apply -> observe -> review -> learn -> repeat
 ```
 
 - **understand**: サイトを読み取り専用で読み(HTTP/sitemap優先、GSC設定があれば
   クエリ×ページ行列も取得)、`site-understanding.json` を生成する。
 - **discover**: `site-understanding.json` とSkill(coding agent)が構造化した
   Opportunity候補を突き合わせ、`identity`(scopeKey+intentKey)単位で重複排除
-  しながら `opportunities.json` に保存する。
+  しながら `opportunities.json` に保存する。`--dump-inputs` は直近concludedの
+  Experiment(何を試して何が起きたか、最大50件)も併せて出す。
 - **prioritize**: `status === 'open'` のOpportunityを固定バケット順位で並べる
   (DESIGN.md §10.4)。状態は変更しない。
 - **propose**: 指定した1件のOpportunityに対しHypothesis/Action/MeasurementPlan
   を受け取り、`Experiment(status: proposed)` を作成してMarkdown reportを出す。
+  同じページに既にactiveなExperimentがあれば(別のOpportunity由来でも)拒否する。
+- **apply**: 対象サイトのリポジトリで実際に行った変更(B review・test/build・
+  commit・deploy・live verification)を構造化evidenceとして受け取り、検証した
+  上で `Experiment` を `proposed -> approved -> applied -> observing` へ進める。
+  `REVISE` のみ対応、サイト編集やBの呼び出し自体はこのコマンドは行わない。
+- **review**: 固定tier(3/7/14/28日)でのrolling checkpoint review。
+  `observation.start` からの厳密な日付範囲でGSCを直接取得し、変更前後を
+  同じ日数で比較する(trailing 28日snapshotの使い回しはしない)。十分な
+  根拠があればSkillが`conclude`を選び、`after`/`result`/`learning`を保存して
+  `Experiment` を `concluded` にし、他にactiveなExperimentが無ければ
+  Opportunityを `open` へ戻す。
 
-**サイトへの書き込み、B(自然言語生成)の実呼び出し、PR作成、publishはMilestone 1
-に含まれない。** `SiteReaderAdapter` は型として書き込みメソッドを持たない。
+**複数のExperimentを並行して観測できる**(`config.experiment.maxActiveExperiments`
+、既定3)。ただし同一ページに2つ以上のactiveなExperimentは作れない
+(`ACTIVE_PAGE_EXPERIMENT_EXISTS`)。1回のdaily cycleで新規applyは最大1件、
+review/concludeは複数件処理してよい(`.claude/skills/seo-growth-loop/SKILL.md`)。
 
 ## Quick start(credential不要、fixtureのみで一周)
 
@@ -77,6 +94,8 @@ npm run seo -- understand --config <path> [--fixture] [--date YYYY-MM-DD] [--dry
 npm run seo -- discover --config <path> [--fixture] [--dump-inputs] [--opportunities-file <path>] [--dry-run]
 npm run seo -- prioritize --config <path> [--fixture]
 npm run seo -- propose --config <path> [--fixture] --opportunity-id <id> --hypothesis-file <path> [--serp-file <path>] [--dry-run]
+npm run seo -- apply --config <path> --experiment-id <id> --evidence-file <path> [--dry-run]
+npm run seo -- review --config <path> --experiment-id <id> [--dump-inputs | --review-file <path>] [--dry-run]
 npm run seo -- status --config <path> [--fixture]
 ```
 
@@ -93,9 +112,10 @@ Opportunity候補を作る前の材料集めに使う。
 1. `config/seo.config.example.json` を `config/seo.config.json` にコピーし、
    実サイトの値に書き換える(`site.baseUrl` / `site.mode` / `site.reader` /
    `gsc.property` など)。
-2. 通常は新Skill(`.claude/skills/seo-opportunity-watch/SKILL.md` 等、
-   `.claude/skills/seo-rank-watch/SKILL.md` を参照)に従ってcoding agentが
-   一連の操作を行う。
+2. `understand -> discover -> prioritize -> propose` までは
+   `.claude/skills/seo-rank-watch/SKILL.md`、毎日のrolling PDCA
+   (review/conclude/learn、新規apply)は `.claude/skills/seo-growth-loop/SKILL.md`
+   に従ってcoding agentが操作する。scheduler化(無人自動実行)はまだ行っていない。
 3. **`rakusetsu.com` を含む実サイト・実GSCへのアクセスは、DESIGN.md §19.2
    (Milestone 1B)としてユーザーが明示的に許可した後にのみ行う。**
 
@@ -125,7 +145,11 @@ Opportunity候補を作る前の材料集めに使う。
 `site.reader` を `"filesystem"` にすると `FilesystemSiteReaderAdapter` が
 有効になり、`site.contentRoot` 配下のMarkdown/HTMLを読み取り専用で走査する。
 
-サイトへの書き込み(`SiteWriterAdapter`)、B接続、REVISE実行はMilestone 2以降。
+サイトへの書き込み(汎用の `SiteWriterAdapter`)、B接続を含む自動実行器は
+`REVISE` 以外まだ実装していない(`NotImplementedActionExecutor`、DESIGN.md
+§9.6)。`REVISE` についても、対象サイトのリポジトリを直接編集するのは
+Skill/人間の役割のままで、このリポジトリのコード自体はサイトへ書き込まない
+(`apply` は結果のevidenceを検証・記録するだけ)。
 
 ## 状態ファイルの意味
 
@@ -158,8 +182,12 @@ Opportunity候補を作る前の材料集めに使う。
   自動実行しない(提案としてAction typeを出すことはあっても実行器を持たない)
 - 改善効果を予測で断定しない(観測結果のみ報告する)
 - 候補がなければ何もしない(捏造しない)
-- Milestone 1では、サイトへの書き込み・B呼び出し・PR作成・publishへ到達する
-  コードパスが存在しない
+- 同一ページに2つ以上のactiveなExperimentは作れない(`ACTIVE_PAGE_EXPERIMENT_EXISTS`)
+- `maxActiveExperiments`(既定3)を超える新規Experimentは作れない
+- checkpoint reviewで `insufficient_data` を `no_effect` にすり替えない
+- 短期的な順位・impressions低下だけを理由にした自動rollbackは持たない
+- このリポジトリのコード自体がサイトへ書き込む・PRを作る・publishする
+  コードパスはまだ存在しない(`apply` はevidenceの検証・記録のみ)
 
 ## Troubleshooting
 

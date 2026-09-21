@@ -1,4 +1,5 @@
 import { generateId } from './id.js';
+import { toComparablePath } from './text.js';
 import type {
   Action,
   Experiment,
@@ -35,12 +36,63 @@ export class InvalidExperimentTransitionError extends Error {
   }
 }
 
+export class PageConflictError extends Error {
+  readonly code = 'ACTIVE_PAGE_EXPERIMENT_EXISTS';
+  constructor(message: string) {
+    super(message);
+    this.name = 'PageConflictError';
+  }
+}
+
+export class MaxActiveExperimentsError extends Error {
+  readonly code = 'MAX_ACTIVE_EXPERIMENTS_EXCEEDED';
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaxActiveExperimentsError';
+  }
+}
+
 export function isActiveExperimentStatus(status: ExperimentStatus): boolean {
   return (ACTIVE_EXPERIMENT_STATUSES as string[]).includes(status);
 }
 
 export function hasActiveExperiment(experiments: Experiment[], opportunityId: string): boolean {
   return experiments.some((e) => e.opportunityId === opportunityId && isActiveExperimentStatus(e.status));
+}
+
+/** Every page an Experiment touches, from both its Action and its MeasurementPlan scope, path-normalized. */
+function experimentPagePaths(experiment: Pick<Experiment, 'action' | 'measurementPlan'>): string[] {
+  return [...experiment.action.targetPaths, ...experiment.measurementPlan.targetPages].map(toComparablePath);
+}
+
+/**
+ * DESIGN.md 13: two active Experiments touching the same page would make it
+ * impossible to attribute an effect to either one. Different Opportunities
+ * on the *same* page are blocked; different pages are always allowed to run
+ * in parallel (V1 does not attempt cluster/keyword-overlap detection).
+ */
+export function assertNoActivePageConflict(
+  candidate: Pick<Experiment, 'action' | 'measurementPlan'>,
+  experiments: Experiment[],
+): void {
+  const candidatePaths = new Set(experimentPagePaths(candidate));
+  for (const e of experiments) {
+    if (!isActiveExperimentStatus(e.status)) continue;
+    const conflicting = experimentPagePaths(e).filter((p) => candidatePaths.has(p));
+    if (conflicting.length > 0) {
+      throw new PageConflictError(
+        `page(s) already have an active Experiment (${e.id}): ${[...new Set(conflicting)].join(', ')}`,
+      );
+    }
+  }
+}
+
+/** DESIGN.md: rolling PDCA runs several Experiments in parallel, bounded by config.experiment.maxActiveExperiments. */
+export function assertUnderMaxActiveExperiments(experiments: Experiment[], max: number): void {
+  const activeCount = experiments.filter((e) => isActiveExperimentStatus(e.status)).length;
+  if (activeCount >= max) {
+    throw new MaxActiveExperimentsError(`already at maxActiveExperiments (${activeCount}/${max}); refusing to create a new one`);
+  }
 }
 
 /**

@@ -13,6 +13,20 @@ export function normalizePath(path: string): string {
   return withLeadingSlash;
 }
 
+/**
+ * Path-only comparison key for a page reference that may be either a bare
+ * site-relative path (Action.targetPaths convention) or a full URL
+ * (MeasurementPlan.targetPages convention, matching GSC's page field) — the
+ * page-conflict guard needs to recognize both spellings of the same page.
+ */
+export function toComparablePath(value: string): string {
+  try {
+    return normalizePath(new URL(value).pathname);
+  } catch {
+    return normalizePath(value);
+  }
+}
+
 /** Rough word count for CJK+space-delimited text: counts whitespace-separated tokens plus CJK characters. */
 export function countWords(text: string): number {
   const withoutCjk = text.replace(/[　-ヿ㐀-鿿豈-﫿]/gu, ' ');

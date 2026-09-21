@@ -1,17 +1,27 @@
 import { acquireLock } from '../../infra/fs-lock.js';
-import { loadOpportunities, loadRankHistory, loadSiteUnderstanding, saveOpportunities } from '../../infra/json-store.js';
+import { loadExperiments, loadOpportunities, loadRankHistory, loadSiteUnderstanding, saveOpportunities } from '../../infra/json-store.js';
 import { isIntentSlugTooCloseToTitle, mergeDiscoveredOpportunity } from '../opportunity.js';
 import { generateDiscoverReport } from '../report.js';
-import type { DiscoverOpportunityInput, GscSummaryRow, Opportunity, RankHistoryEntry, SiteUnderstanding } from '../types.js';
+import type {
+  DiscoverOpportunityInput,
+  Experiment,
+  ExperimentMemory,
+  GscSummaryRow,
+  Opportunity,
+  RankHistoryEntry,
+  SiteUnderstanding,
+} from '../types.js';
 
 export type DiscoverPaths = {
   siteUnderstanding: string;
   opportunities: string;
+  experiments: string;
   lock: string;
   rankHistory: string;
 };
 
 const MAX_GSC_EVIDENCE_ROWS = 500;
+const MAX_EXPERIMENT_MEMORY = 50;
 
 export type GscEvidence = {
   window?: { start: string; end: string; days: number };
@@ -22,8 +32,31 @@ export type DiscoverDumpResult = {
   siteUnderstanding: SiteUnderstanding;
   gscEvidence?: GscEvidence;
   existingOpportunityIdentities: Array<{ id: string; scopeKey: string; intentKey: string; kind: string; title: string }>;
+  experimentMemory: ExperimentMemory[];
   bootstrapModeSuggested: boolean;
 };
+
+/**
+ * Bounded recent history of concluded Experiments (DESIGN.md rolling PDCA:
+ * "did we already try this on this page, and what happened?"). Most
+ * recently concluded first; capped so the dump stays bounded on a
+ * long-running site.
+ */
+export function buildExperimentMemory(experiments: Experiment[]): ExperimentMemory[] {
+  return experiments
+    .filter((e) => e.status === 'concluded' && e.result)
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+    .slice(0, MAX_EXPERIMENT_MEMORY)
+    .map((e) => ({
+      experimentId: e.id,
+      opportunityId: e.opportunityId,
+      actionType: e.action.type,
+      targetPaths: e.action.targetPaths,
+      outcome: e.result!.outcome,
+      ...(e.learning ? { learning: e.learning } : {}),
+      concludedAt: e.updatedAt,
+    }));
+}
 
 /**
  * Bounded, unfiltered query×page evidence from the most recent GSC
@@ -50,6 +83,7 @@ export function buildGscEvidence(entries: RankHistoryEntry[]): GscEvidence | und
 export async function dumpDiscoverInputs(paths: DiscoverPaths): Promise<DiscoverDumpResult> {
   const siteUnderstanding = await loadSiteUnderstanding(paths.siteUnderstanding);
   const opportunities = await loadOpportunities(paths.opportunities);
+  const experiments = await loadExperiments(paths.experiments);
   const gscEvidence = await loadGscEvidence(paths.rankHistory);
   return {
     siteUnderstanding,
@@ -61,6 +95,7 @@ export async function dumpDiscoverInputs(paths: DiscoverPaths): Promise<Discover
       kind: o.kind,
       title: o.title,
     })),
+    experimentMemory: buildExperimentMemory(experiments),
     bootstrapModeSuggested: siteUnderstanding.pages.length === 0 && siteUnderstanding.gscSummary === undefined,
   };
 }

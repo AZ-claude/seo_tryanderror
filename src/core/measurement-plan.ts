@@ -1,5 +1,40 @@
 import { computeMeasurementWindow } from './date.js';
-import type { MeasurementPlan, MetricsSnapshot, MetricsSnapshotSource, RankHistory, RankHistoryEntry } from './types.js';
+import type {
+  GscSummaryRow,
+  MeasurementPlan,
+  MetricsSnapshot,
+  MetricsSnapshotSource,
+  RankHistory,
+  RankHistoryEntry,
+} from './types.js';
+
+/**
+ * Shared row-filter + aggregate step behind `computeMetricsSnapshot` (from a
+ * rank-history snapshot) and the review workflow's exact-window GSC fetch
+ * (DESIGN.md checkpoint review) — same target-scope filtering and
+ * `sufficientData` rule either way, just a different row source.
+ */
+export function aggregateGscRows(
+  rows: Array<Pick<GscSummaryRow, 'page' | 'query' | 'impressions' | 'clicks' | 'position'>>,
+  scope: Pick<MeasurementPlan, 'targetPages' | 'targetQueries' | 'minimumImpressions'>,
+): { impressions: number; clicks: number; ctr: number; position: number; sufficientData: boolean } {
+  const targetPages = new Set(scope.targetPages);
+  const targetQueries = scope.targetQueries ? new Set(scope.targetQueries) : null;
+  const matched = rows
+    .filter((r) => (r.page !== null ? targetPages.has(r.page) : false))
+    .filter((r) => (targetQueries ? targetQueries.has(r.query) : true));
+
+  const impressions = matched.reduce((sum, r) => sum + r.impressions, 0);
+  const clicks = matched.reduce((sum, r) => sum + r.clicks, 0);
+  const positionWeighted = matched.reduce((sum, r) => sum + r.position * r.impressions, 0);
+  const position = impressions > 0 ? positionWeighted / impressions : 0;
+  const ctr = impressions > 0 ? clicks / impressions : 0;
+
+  const threshold = scope.minimumImpressions ?? 0;
+  const sufficientData = matched.length > 0 && impressions >= threshold;
+
+  return { impressions, clicks, ctr, position, sufficientData };
+}
 
 /**
  * An entry's own `window` (set when it was fetched, e.g. a trailing-28-day
@@ -58,22 +93,12 @@ export function computeMetricsSnapshot(input: {
 }): MetricsSnapshot {
   const { rankHistory, measurementPlan, today, windowDays, finalDataLagDays, source, now } = input;
   const window = computeMeasurementWindow({ today, windowDays, finalDataLagDays });
-  const targetPages = new Set(measurementPlan.targetPages);
-  const targetQueries = measurementPlan.targetQueries ? new Set(measurementPlan.targetQueries) : null;
 
   const selectedEntry = pickSnapshotEntry(rankHistory.entries, source, window);
-  const rows = (selectedEntry?.rows ?? [])
-    .filter((r) => (r.page !== null ? targetPages.has(r.page) : false))
-    .filter((r) => (targetQueries ? targetQueries.has(r.query) : true));
-
-  const impressions = rows.reduce((sum, r) => sum + r.impressions, 0);
-  const clicks = rows.reduce((sum, r) => sum + r.clicks, 0);
-  const positionWeighted = rows.reduce((sum, r) => sum + r.position * r.impressions, 0);
-  const position = impressions > 0 ? positionWeighted / impressions : 0;
-  const ctr = impressions > 0 ? clicks / impressions : 0;
-
-  const threshold = measurementPlan.minimumImpressions ?? 0;
-  const sufficientData = rows.length > 0 && impressions >= threshold;
+  const { impressions, clicks, ctr, position, sufficientData } = aggregateGscRows(
+    selectedEntry?.rows ?? [],
+    measurementPlan,
+  );
 
   return {
     at: now,

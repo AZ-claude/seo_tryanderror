@@ -59,6 +59,7 @@ test('fixture E2E: understand -> discover -> prioritize -> propose produces a pr
       now: '2026-09-10T00:00:00.000Z',
       finalDataLagDays: 0,
       metricsSource: 'fixture',
+      maxActiveExperiments: 3,
       dryRun: false,
     });
     assert.equal(proposeResult.exitCode, 0);
@@ -81,6 +82,7 @@ test('fixture E2E: understand -> discover -> prioritize -> propose produces a pr
       now: '2026-09-11T00:00:00.000Z',
       finalDataLagDays: 0,
       metricsSource: 'fixture',
+      maxActiveExperiments: 3,
       dryRun: false,
     });
     assert.equal(secondProposeResult.exitCode, 1);

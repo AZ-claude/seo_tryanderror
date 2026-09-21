@@ -159,6 +159,25 @@ export const experimentEventSchema = z.object({
   note: z.string().optional(),
 });
 
+export const checkpointDaySchema = z.union([z.literal(3), z.literal(7), z.literal(14), z.literal(28)]);
+
+export const reviewCheckpointSchema = z.object({
+  at: isoTimestamp,
+  checkpointDay: checkpointDaySchema,
+  elapsedDays: z.number().nonnegative(),
+  comparisonWindow: z.object({
+    beforeStart: dateString,
+    beforeEnd: dateString,
+    afterStart: dateString,
+    afterEnd: dateString,
+    days: z.number().positive(),
+  }),
+  before: metricsSnapshotSchema,
+  after: metricsSnapshotSchema,
+  decision: z.enum(['continue_observing', 'ready_to_conclude', 'insufficient_data']),
+  note: z.string(),
+});
+
 export const experimentSchema = z.object({
   id: z.string().min(1),
   opportunityId: z.string().min(1),
@@ -171,6 +190,7 @@ export const experimentSchema = z.object({
   observation: z.object({ start: dateString, end: dateString, nextReviewDate: dateString }).optional(),
   result: z.object({ outcome: reviewOutcomeSchema, notes: z.string() }).optional(),
   learning: z.string().optional(),
+  checkpoints: z.array(reviewCheckpointSchema).optional(),
   createdAt: isoTimestamp,
   updatedAt: isoTimestamp,
   history: z.array(experimentEventSchema),
@@ -283,6 +303,7 @@ export const seoConfigSchema = z.object({
   }),
   experiment: z.object({
     cooldownDays: z.number().positive(),
+    maxActiveExperiments: z.number().int().positive().optional(),
   }),
   commands: z.object({
     build: z.string().nullable(),
@@ -322,6 +343,23 @@ export const discoverOpportunityInputSchema = z
 export const discoverInputFileSchema = z.object({
   opportunities: z.array(discoverOpportunityInputSchema),
 });
+
+export const reviewDecisionInputSchema = z
+  .object({
+    decision: z.enum(['continue_observing', 'conclude']),
+    proposedOutcome: reviewOutcomeSchema.optional(),
+    note: z.string().min(1),
+    learning: z.string().optional(),
+  })
+  .superRefine((input, ctx) => {
+    if (input.decision === 'conclude' && !input.proposedOutcome) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'proposedOutcome is required when decision=conclude',
+        path: ['proposedOutcome'],
+      });
+    }
+  });
 
 export const proposeInputSchema = z.object({
   hypothesis: z.object({

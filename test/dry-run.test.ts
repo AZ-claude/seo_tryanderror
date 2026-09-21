@@ -80,6 +80,7 @@ test('discover + propose --dry-run: opportunities.json and experiments.json are 
       now: '2026-09-10T00:00:00.000Z',
       finalDataLagDays: 0,
       metricsSource: 'fixture',
+      maxActiveExperiments: 3,
       dryRun: true,
     });
     assert.equal(proposeResult.exitCode, 0);

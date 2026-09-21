@@ -2,8 +2,12 @@ import { acquireLock } from '../../infra/fs-lock.js';
 import { loadExperiments, loadOpportunities, loadRankHistory, saveExperiments, saveOpportunities } from '../../infra/json-store.js';
 import {
   ActiveExperimentGuardError,
+  MaxActiveExperimentsError,
   OpportunityNotOpenError,
+  PageConflictError,
   assertCanCreateExperiment,
+  assertNoActivePageConflict,
+  assertUnderMaxActiveExperiments,
   buildExperiment,
 } from '../experiment.js';
 import { generateId } from '../id.js';
@@ -26,6 +30,7 @@ export type ProposeOptions = {
   now: string;
   finalDataLagDays: number;
   metricsSource: MetricsSnapshotSource;
+  maxActiveExperiments: number;
   serp?: SerpInspection;
   dryRun: boolean;
 };
@@ -53,8 +58,18 @@ export async function runPropose(paths: ProposePaths, options: ProposeOptions): 
 
     try {
       assertCanCreateExperiment(opportunity, experiments);
+      assertUnderMaxActiveExperiments(experiments, options.maxActiveExperiments);
+      assertNoActivePageConflict(
+        { action: options.input.action, measurementPlan: options.input.measurementPlan },
+        experiments,
+      );
     } catch (err) {
-      if (err instanceof ActiveExperimentGuardError || err instanceof OpportunityNotOpenError) {
+      if (
+        err instanceof ActiveExperimentGuardError ||
+        err instanceof OpportunityNotOpenError ||
+        err instanceof MaxActiveExperimentsError ||
+        err instanceof PageConflictError
+      ) {
         return {
           exitCode: 1,
           report: generateProposeReport({

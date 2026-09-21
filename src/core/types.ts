@@ -157,6 +157,33 @@ export type ExperimentEvent = {
   note?: string;
 };
 
+/** Fixed rolling-review checkpoint tiers, days since Experiment.observation.start. */
+export const CHECKPOINT_DAYS = [3, 7, 14, 28] as const;
+export type CheckpointDay = (typeof CHECKPOINT_DAYS)[number];
+
+/**
+ * A "look, don't necessarily conclude" review at a fixed checkpoint tier
+ * (rolling PDCA, not a 28-day-only wait). Uses an equal-length before/after
+ * window (never a trailing-N-day GSC window compared against itself) so an
+ * early checkpoint isn't diluted by mostly-overlapping days.
+ */
+export type ReviewCheckpoint = {
+  at: string;
+  checkpointDay: CheckpointDay;
+  elapsedDays: number;
+  comparisonWindow: {
+    beforeStart: string;
+    beforeEnd: string;
+    afterStart: string;
+    afterEnd: string;
+    days: number;
+  };
+  before: MetricsSnapshot;
+  after: MetricsSnapshot;
+  decision: 'continue_observing' | 'ready_to_conclude' | 'insufficient_data';
+  note: string;
+};
+
 export type Experiment = {
   id: string;
   opportunityId: string;
@@ -169,6 +196,7 @@ export type Experiment = {
   observation?: { start: string; end: string; nextReviewDate: string };
   result?: { outcome: ReviewOutcome; notes: string };
   learning?: string;
+  checkpoints?: ReviewCheckpoint[];
   createdAt: string;
   updatedAt: string;
   history: ExperimentEvent[];
@@ -338,6 +366,7 @@ export type SeoConfig = {
   };
   experiment: {
     cooldownDays: number;
+    maxActiveExperiments?: number;
   };
   commands: {
     build: string | null;
@@ -348,6 +377,25 @@ export type SeoConfig = {
     site: 'http-readonly' | 'filesystem-readonly' | 'fixture';
     search: 'fixture' | 'file';
   };
+};
+
+// --- experiment memory (concluded Experiments -> discover --dump-inputs) ---
+
+/**
+ * A bounded summary of a concluded Experiment so DISCOVER doesn't propose
+ * re-running something already tried on the same page (DESIGN.md rolling
+ * PDCA). Deliberately thin — the full Experiment/Opportunity record remains
+ * the source of truth; this is just enough for a Skill to recognize "already
+ * tried this".
+ */
+export type ExperimentMemory = {
+  experimentId: string;
+  opportunityId: string;
+  actionType: ActionType;
+  targetPaths: string[];
+  outcome: ReviewOutcome;
+  learning?: string;
+  concludedAt: string;
 };
 
 // --- discover input (Skill -> CLI) ---
@@ -373,6 +421,24 @@ export type ProposeInput = {
   };
   action: Action;
   measurementPlan: MeasurementPlan;
+};
+
+// --- review decision input (Skill -> CLI, rolling checkpoint review) ---
+
+/**
+ * `review --review-file`: the Skill's semantic judgment on a freshly
+ * recomputed checkpoint (core never invents this call itself — see
+ * ReviewCheckpoint.decision for core's own mechanical
+ * data-sufficiency-only signal). `decision: 'conclude'` requires
+ * `proposedOutcome`; core still validates it's consistent with whether the
+ * checkpoint actually has sufficient data (DESIGN.md: insufficient_data is
+ * never silently turned into no_effect).
+ */
+export type ReviewDecisionInput = {
+  decision: 'continue_observing' | 'conclude';
+  proposedOutcome?: ReviewOutcome;
+  note: string;
+  learning?: string;
 };
 
 // --- apply evidence (Skill/human -> CLI, Milestone 2 minimal REVISE-only apply) ---
