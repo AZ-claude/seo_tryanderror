@@ -117,8 +117,14 @@ npm run seo -- prioritize --config config/seo.config.json
 以下のいずれかに該当したら、**その日は新規applyなしで終了**する(handoff
 不要、reportだけ書いて終わる)。
 
-- `observingExperiments.length >= maxActiveExperiments`
-  (`config.experiment.maxActiveExperiments`、未指定なら3)
+- **active Experiment数が `maxActiveExperiments` 以上**
+  (`config.experiment.maxActiveExperiments`、未指定なら3)。ここでいう
+  active数は `status` が `proposed`/`approved`/`applied`/`observing` の
+  いずれかであるExperiment全部の数であり、`status --dump-inputs`等の
+  `observingExperiments`(`status: observing` かつ `nextReviewDate` がまだ
+  未到来のものだけ)ではない——両者を混同しない。実際の判定はcoreの
+  `assertUnderMaxActiveExperiments()`(`propose`が内部で必ず呼ぶ)が正本
+  であり、このSkillの事前チェックはproposeを試す前の目安に過ぎない。
 - prioritizeの上位Opportunityが、既にactiveなExperimentと同じページ
   (`Action.targetPaths`/`MeasurementPlan.targetPages`)を指している
   → 次に確度の高い、**衝突しないページ**のOpportunityを探す。全部衝突するなら

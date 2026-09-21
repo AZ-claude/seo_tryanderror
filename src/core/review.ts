@@ -5,13 +5,15 @@ import type { CheckpointDay, MetricKey, MetricsSnapshot, ReviewCheckpoint, Revie
 /**
  * Equal-length before/after comparison window for a rolling checkpoint
  * (never a trailing-N-day GSC window compared against itself — see
- * DESIGN.md rolling PDCA rationale). `afterStart` is the day after
- * `observationStart` (the apply/deploy day itself is excluded from "after"
- * since it may only be partially post-change); `beforeEnd` is
- * `observationStart` itself, so before/after never overlap. The after
- * window is capped by the latest confirmed-final GSC date
- * (`today - finalDataLagDays`); if that cap falls before `afterStart`,
- * there is no post-change final data at all yet and this returns null.
+ * DESIGN.md rolling PDCA rationale). The deploy/observation-start day
+ * itself is excluded from BOTH sides, not just "after": it mixes
+ * pre-change and post-change traffic, and a short 3/7-day checkpoint
+ * shouldn't let that partial day leak into the baseline either.
+ * `afterStart` is `observationStart + 1`; `beforeEnd` is
+ * `observationStart - 1`. The after window is capped by the latest
+ * confirmed-final GSC date (`today - finalDataLagDays`); if that cap
+ * falls before `afterStart`, there is no post-change final data at all
+ * yet and this returns null.
  */
 export function computeComparisonWindow(input: {
   observationStart: string;
@@ -28,7 +30,7 @@ export function computeComparisonWindow(input: {
   const days = diffDays(afterStart, afterEnd) + 1;
   if (days <= 0) return null;
 
-  const beforeEnd = observationStart;
+  const beforeEnd = addDays(observationStart, -1);
   const beforeStart = addDays(beforeEnd, -(days - 1));
   return { beforeStart, beforeEnd, afterStart, afterEnd, days };
 }

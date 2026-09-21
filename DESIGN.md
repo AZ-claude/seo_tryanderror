@@ -753,7 +753,7 @@ npm run seo -- apply --config config/seo.config.json \
 
 28日間隔で1回だけ判定する直列運用ではなく、固定tier `[3, 7, 14, 28]`（`CHECKPOINT_DAYS`）日でのrolling reviewを行う。「見るタイミング」であり「必ず終了するタイミング」ではない——早いtierで十分なsignalが無ければ単に観測を続ける。
 
-**equal-window比較**: `rank-history.json` のtrailing 28日snapshotを早期review（例: 7日目）にそのまま使うと、変更前後で大部分の日数が重複し判定が歪む。そのため `review` は `RealGscAdapter.fetchQueryPageMatrix()`（独自GSC clientは作らない）で毎回**厳密な日付範囲**を直接read-only取得し、before/afterを同じ日数で比較する（`src/core/review.ts` の `computeComparisonWindow`）。`afterStart` は `observation.start + 1日`（deploy当日はafterから除外）、`beforeEnd` は `observation.start` 自身（before/afterは重複しない）、`afterEnd` は `min(observation.start + checkpointDay, today - finalDataLagDays)` でfinal data lagを反映する。
+**equal-window比較**: `rank-history.json` のtrailing 28日snapshotを早期review（例: 7日目）にそのまま使うと、変更前後で大部分の日数が重複し判定が歪む。そのため `review` は `RealGscAdapter.fetchQueryPageMatrix()`（独自GSC clientは作らない）で毎回**厳密な日付範囲**を直接read-only取得し、before/afterを同じ日数で比較する（`src/core/review.ts` の `computeComparisonWindow`）。**deploy日（`observation.start`）はbefore/afterのどちらからも完全に除外する**——`afterStart` は `observation.start + 1日`、`beforeEnd` は `observation.start - 1日`。deploy日はdeploy前とdeploy後のトラフィックが混在する部分日であり、3日/7日のような短いcheckpointではこの1日を「変更前」にも「変更後」にも含めたくないため。`afterEnd` は `min(observation.start + checkpointDay, today - finalDataLagDays)` でfinal data lagを反映する。例（`observation.start = 2026-09-21`、`checkpointDay = 7`、`finalDataLagDays = 2`、review日 `2026-09-29`）: `after = 2026-09-22..2026-09-27`（6日）、`before = 2026-09-15..2026-09-20`（6日、9/21は含まない）。
 
 ```bash
 npm run seo -- review --config config/seo.config.json \

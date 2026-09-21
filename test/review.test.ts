@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { diffDays } from '../src/core/date.js';
 import {
   METRIC_DIRECTION,
   assertOutcomeConsistentWithCheckpoint,
@@ -34,8 +35,8 @@ test('computeComparisonWindow: before and after windows are equal length', () =>
   assert.ok(w);
   assert.equal(w!.afterStart, '2026-09-22');
   assert.equal(w!.afterEnd, '2026-09-28');
-  assert.equal(w!.beforeEnd, '2026-09-21');
-  assert.equal(w!.beforeStart, '2026-09-15');
+  assert.equal(w!.beforeEnd, '2026-09-20');
+  assert.equal(w!.beforeStart, '2026-09-14');
   assert.equal(w!.days, 7);
 });
 
@@ -51,12 +52,18 @@ test('computeComparisonWindow: finalDataLagDays caps the after window (worked ex
   assert.equal(w!.afterStart, '2026-09-22');
   assert.equal(w!.afterEnd, '2026-09-27'); // capped by today(9/29) - lag(2) = 9/27, not the ideal 9/28
   assert.equal(w!.days, 6);
-  assert.equal(w!.beforeStart, '2026-09-16');
-  assert.equal(w!.beforeEnd, '2026-09-21');
+  assert.equal(w!.beforeStart, '2026-09-15');
+  assert.equal(w!.beforeEnd, '2026-09-20');
+
+  // deploy day (observationStart) is excluded from both sides, and before/after never overlap
+  assert.notEqual(w!.beforeEnd, '2026-09-21');
+  assert.notEqual(w!.afterStart, '2026-09-21');
+  assert.ok(w!.beforeEnd < w!.afterStart);
+  assert.equal(diffDays(w!.beforeStart, w!.beforeEnd) + 1, diffDays(w!.afterStart, w!.afterEnd) + 1);
 });
 
-// 3. deploy当日をafterから除外
-test('computeComparisonWindow: the deploy/observation-start day itself is excluded from the after window', () => {
+// 3. deploy当日をbefore/afterのどちらからも完全除外
+test('computeComparisonWindow: the deploy/observation-start day itself is excluded from BOTH the before and after windows', () => {
   const w = computeComparisonWindow({
     observationStart: '2026-09-21',
     checkpointDay: 3,
@@ -66,7 +73,8 @@ test('computeComparisonWindow: the deploy/observation-start day itself is exclud
   assert.ok(w);
   assert.notEqual(w!.afterStart, '2026-09-21');
   assert.equal(w!.afterStart, '2026-09-22');
-  assert.equal(w!.beforeEnd, '2026-09-21'); // before window ends exactly at the deploy day, no overlap with after
+  assert.notEqual(w!.beforeEnd, '2026-09-21');
+  assert.equal(w!.beforeEnd, '2026-09-20'); // before window ends the day BEFORE the deploy day
 });
 
 test('computeComparisonWindow: no post-change final data yet -> null', () => {
