@@ -1,37 +1,55 @@
 ---
 name: seo-rank-watch
 description: >
-  サイトを理解し、Opportunityを発見し、優先順位をつけ、次に試す施策を
+  特定1サイトを理解し、Opportunityを発見し、優先順位をつけ、次に試す施策を
   Experiment(status: proposed)として提案する(understand -> discover ->
   prioritize -> propose)。
-  「SEO改善」「検索順位を上げる」「seo-rank-watch」「検索順位を見る」
-  「Opportunityを探して」と言われたら起動する。
+  「<site名>のSEO改善」「<site名>の検索順位を上げる」「seo-rank-watch」
+  「<site名>のOpportunityを探して」と言われたら起動する。site名が無く対象が
+  一意に定まらない場合は、先に対象siteを確認する(下記「対象siteの解決」)。
 ---
 
 # seo-rank-watch
 
-このSkillは `seo_tryanderror`(このリポジトリのC: 自律サイト育成エンジン)を
-動かす。状態管理・履歴・重複防止・遷移制御は決定論的コード(`src/core/*`)が持ち、
-サイト内容の意味理解・Opportunity発見・仮説生成だけをこのSkill(=あなた)が担当する。
+このSkillは `seo_tryanderror`(このリポジトリのC: 自律サイト育成エンジン)を、
+**特定1サイトに対して** 動かす。状態管理・履歴・重複防止・遷移制御・
+state/lock/reportsのサイト間分離は決定論的コード(`src/core/*`、
+`config.site.key`ベース)が持ち、サイト内容の意味理解・Opportunity発見・
+仮説生成だけをこのSkill(=あなた)が担当する。
 
 主語は `keyword` ではなく `Opportunity`(page × search intent × hypothesis)で
 ある。詳細な型・ルールは `DESIGN.md`(正本)を参照。
 
 **Milestone 1の範囲は `understand -> discover -> prioritize -> propose` まで。**
 サイトへの書き込み、B(自然な日本語生成)の呼び出し、PR作成、publishは行わない。
-`rakusetsu.com` を含む実サイト・実GSCへのアクセスは、ユーザーが明示的に許可した
-場合(Milestone 1B)にのみ行う。それ以外はfixtureまたは既存の
+実サイト・実GSCへのアクセスは、ユーザーが明示的に許可した場合(Milestone 1B)
+にのみ行う。それ以外はfixtureまたは既存の
 `site-understanding.json`/`opportunities.json`/`experiments.json` に対して操作する。
+
+## 対象siteの解決(必須、最初に行う)
+
+`config/seo.config.json` という固定パスは使わない(実運用では存在しない)。
+対象siteのconfigPathは、`.claude/skills/seo-growth-loop/SKILL.md` の
+「対象siteの解決」節と同じルールで確定する:
+
+1. ユーザーがsite名を明示 → 対応するconfigPath(例:
+   `config/seo.rakusetsu.config.json`/`config/seo.pokeca.config.json`)を使う。
+2. 文脈から一意に定まるならそれを使う。
+3. **一意に定まらない場合は `config/*.config.json` を実際に列挙してユーザーに
+   確認する。片方を勝手に選ばない。**
+
+以後、本Skill内の `npm run seo -- ...` はすべて `--config <resolved-config>`
+を付ける。
 
 ## 起動条件
 
 次のような依頼があったとき起動する。
 
-- SEO改善
-- 検索順位を上げる
+- <site名>のSEO改善
+- <site名>の検索順位を上げる
 - seo-rank-watch
-- 検索順位を見る
-- Opportunityを探して
+- <site名>の検索順位を見る
+- <site名>のOpportunityを探して
 
 ## 手順
 
@@ -40,7 +58,7 @@ description: >
 ### 1. status
 
 ```bash
-npm run seo -- status --config config/seo.config.json
+npm run seo -- status --config <resolved-config>
 ```
 
 `openOpportunities` / `proposedExperiments` / `observing` / `dueForReview` /
@@ -49,7 +67,7 @@ npm run seo -- status --config config/seo.config.json
 ### 2. understand
 
 ```bash
-npm run seo -- understand --config config/seo.config.json
+npm run seo -- understand --config <resolved-config>
 ```
 
 サイトを読み取り専用で読み、GSC設定があればクエリ×ページ行列も取得する。
@@ -64,7 +82,7 @@ GSC未設定でも失敗しない(`GSC_NOT_CONFIGURED` として続行)。
 まず材料を確認する(任意、書き込みなし)。
 
 ```bash
-npm run seo -- discover --config config/seo.config.json --dump-inputs
+npm run seo -- discover --config <resolved-config> --dump-inputs
 ```
 
 `site-understanding.json` の内容(ページのexcerpt/headings、GSCクエリ×ページ)と、
@@ -76,7 +94,7 @@ npm run seo -- discover --config config/seo.config.json --dump-inputs
 `src/core/types.ts` 参照)、渡す。
 
 ```bash
-npm run seo -- discover --config config/seo.config.json \
+npm run seo -- discover --config <resolved-config> \
   --opportunities-file /path/to/opportunities.json
 ```
 
@@ -99,7 +117,7 @@ WebSearchを実行した要約を `evidence` に含めるか、`--serp-file` を
 ### 4. prioritize
 
 ```bash
-npm run seo -- prioritize --config config/seo.config.json
+npm run seo -- prioritize --config <resolved-config>
 ```
 
 固定のbucket順位(DESIGN.md §10.4)で並んだOpportunity一覧が出る。状態は
@@ -130,7 +148,7 @@ npm run seo -- prioritize --config config/seo.config.json
 選ぶ判断(手順6を参照)がむしろ通常になる。
 
 ```bash
-npm run seo -- propose --config config/seo.config.json \
+npm run seo -- propose --config <resolved-config> \
   --opportunity-id <id> \
   --hypothesis-file /path/to/hypothesis.json \
   --serp-file /path/to/serp.json

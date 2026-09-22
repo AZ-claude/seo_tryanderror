@@ -109,15 +109,47 @@ Opportunity候補を作る前の材料集めに使う。
 
 ## Daily operation(実サイト運用、Milestone 1Bとして別途許可が必要)
 
-1. `config/seo.config.example.json` を `config/seo.config.json` にコピーし、
-   実サイトの値に書き換える(`site.baseUrl` / `site.mode` / `site.reader` /
-   `gsc.property` など)。
+**複数サイトを同じリポジトリから完全に独立したstateで運用できる**
+(state/lock/Experiment上限/reports/learningはすべて `config.site.key` 単位で
+分離される。詳細はDESIGN.mdおよび下記「Multi-site」参照)。
+
+1. サイトごとに `config/seo.config.example.json` をコピーした専用config
+   ファイル(例: `config/seo.rakusetsu.config.json` / `config/seo.pokeca.config.json`)
+   を用意し、`site.key`(state namespace)・`site.baseUrl` / `site.mode` /
+   `site.reader` / `gsc.property`(必要なら `gsc.pagePrefix`/
+   `gsc.excludePagePrefix`)を実サイトの値に書き換える。固定パス
+   `config/seo.config.json` を実運用で使うことは想定していない
+   (`--config` を省略した場合の挙動は後方互換のためのレガシー動作であり、
+   複数サイト運用の入口ではない)。
 2. `understand -> discover -> prioritize -> propose` までは
    `.claude/skills/seo-rank-watch/SKILL.md`、毎日のrolling PDCA
    (review/conclude/learn、新規apply)は `.claude/skills/seo-growth-loop/SKILL.md`
-   に従ってcoding agentが操作する。scheduler化(無人自動実行)はまだ行っていない。
-3. **`rakusetsu.com` を含む実サイト・実GSCへのアクセスは、DESIGN.md §19.2
-   (Milestone 1B)としてユーザーが明示的に許可した後にのみ行う。**
+   に従ってcoding agentが操作する。どちらも実行のたびに対象siteの
+   configPathを明示的に解決してから動く(単一site専用)。scheduler化
+   (無人自動実行)はまだ行っていない。
+3. **`rakusetsu.com`/`pokeca.rakusetsu.com` を含む実サイト・実GSCへの
+   アクセスは、DESIGN.md §19.2(Milestone 1B)としてユーザーが明示的に
+   許可した後にのみ行う。**
+
+### Multi-site
+
+```text
+「rakusetsu-mainのPDCA回して」  -> config/seo.rakusetsu.config.json だけで
+                                    seo-growth-loop を1cycle
+「pokecaのPDCA回して」          -> config/seo.pokeca.config.json だけで
+                                    seo-growth-loop を1cycle
+「両サイトのPDCA回して」        -> .claude/skills/seo-multi-site-loop/SKILL.md
+                                    が上の2つを直列に1cycleずつ実行し、
+                                    最後にサイト別の統合reportを出す
+```
+
+サイトを跨いだOpportunity/Experiment/rank-history/site-understanding/lock/
+reportの混在は無い(`data/seo/<site.key>/`・`reports/<site.key>/` で
+物理的に分離される)。pokecaのようにsite側リポジトリの`AGENTS.md`が
+Heavy tier(public site deploy等)を要求している場合、branch/PR/独立review
+PASSを経てからでないとmerge/deployしない(`seo-growth-loop`の該当節参照)
+——このtier判定はC本体にハードコードせず、対象repoの`AGENTS.md`を都度読んで
+判断する。
 
 ## GSC setup
 
