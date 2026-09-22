@@ -1,5 +1,5 @@
 import { acquireLock } from '../../infra/fs-lock.js';
-import { appendRankHistory, loadRankHistory, saveSiteUnderstanding } from '../../infra/json-store.js';
+import { appendRankHistory, loadRankHistory, loadSiteUnderstanding, saveSiteUnderstanding } from '../../infra/json-store.js';
 import { computeMeasurementWindow } from '../date.js';
 import { GscError } from '../../adapters/gsc.js';
 import { generateUnderstandReport } from '../report.js';
@@ -114,6 +114,18 @@ export async function runUnderstand(
       }
     }
 
+    /**
+     * `themes`/`proprietaryDataNotes` are Skill-authored semantic judgment
+     * (DESIGN.md 10.2), not something `understand` can re-derive on its own
+     * from a page crawl. `understand` reruns far more often than a human/
+     * Skill actually revisits and rewrites those fields (e.g. a routine
+     * daily-cycle UNDERSTAND that forgets --understanding-file), so an
+     * absent override must fall back to whatever is already persisted,
+     * never silently reset to empty. Only an explicit override replaces
+     * them; no existing file (first run) is the only case that yields [].
+     */
+    const existingUnderstanding = await loadSiteUnderstanding(paths.siteUnderstanding).catch(() => null);
+
     const maturity = computeMaturity({
       pageCount: pages.length,
       hasGscData: gscSummary !== undefined,
@@ -127,8 +139,9 @@ export async function runUnderstand(
       site: { baseUrl: options.baseUrl },
       generatedAt,
       pages,
-      themes: options.understandingOverride?.themes ?? [],
-      proprietaryDataNotes: options.understandingOverride?.proprietaryDataNotes ?? [],
+      themes: options.understandingOverride?.themes ?? existingUnderstanding?.themes ?? [],
+      proprietaryDataNotes:
+        options.understandingOverride?.proprietaryDataNotes ?? existingUnderstanding?.proprietaryDataNotes ?? [],
       gscSummary,
       maturity,
     };
