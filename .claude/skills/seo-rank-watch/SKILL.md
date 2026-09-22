@@ -119,6 +119,16 @@ npm run seo -- prioritize --config config/seo.config.json
 4. `measurementPlan`: `targetPages`/`targetQueries`・`primaryMetric`・
    `baselineWindowDays`/`reviewWindowDays`・`minimumImpressions`
 
+`minimumImpressions` は実際に観測されているimpressions量に合わせて誠実に決める
+(閾値を下げて「十分なデータがある」ように見せない)。低トラフィックなサイト/
+ページでは、実測ベースラインが1桁impressionsしか無いことも普通にある——その
+場合はその事実をそのまま`minimumImpressions`に反映し、hypothesis.rationaleにも
+明記する。**注意: `minimumImpressions`は「機械的にsufficientData判定できる最低
+条件」であり、「その水準のimpressionsだけでcheckpointをconcludeしてよい」という
+意味ではない。** `review`の`canConclude: true`は母数が極小でも機械的にtrueになり
+得る——低トラフィックな候補では、`canConclude: true`でも`continue_observing`を
+選ぶ判断(手順6を参照)がむしろ通常になる。
+
 ```bash
 npm run seo -- propose --config config/seo.config.json \
   --opportunity-id <id> \

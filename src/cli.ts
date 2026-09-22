@@ -20,6 +20,7 @@ import { getStatusView } from './core/status.js';
 import { runApply } from './core/workflow/apply.js';
 import { dumpDiscoverInputs, runDiscover } from './core/workflow/discover.js';
 import { runPropose } from './core/workflow/propose.js';
+import { runReject } from './core/workflow/reject.js';
 import { dumpReviewInputs, runReviewDecision } from './core/workflow/review.js';
 import { runUnderstand } from './core/workflow/understand.js';
 import type { GscAdapter, GscSummaryRow, SeoConfig, SiteReaderAdapter } from './core/types.js';
@@ -312,6 +313,29 @@ export async function cmdApply(flags: Flags): Promise<number> {
   return result.exitCode;
 }
 
+export async function cmdReject(flags: Flags): Promise<number> {
+  const dryRun = Boolean(flags['dry-run']);
+  const config = await loadConfigIfProvided(flags);
+  const paths = resolveDataPaths(process.cwd(), false, config?.site.key);
+
+  const experimentId = flagString(flags, 'experiment-id');
+  const reason = flagString(flags, 'reason');
+  if (!experimentId || !reason) {
+    console.error('reject requires --experiment-id <id> --reason <text>');
+    return 1;
+  }
+
+  const result = await runReject(paths, {
+    experimentId,
+    reason,
+    now: new Date().toISOString(),
+    dryRun,
+  });
+
+  await writeReport(result.report, dryRun || result.exitCode !== 0, config?.site.key);
+  return result.exitCode;
+}
+
 export async function cmdReview(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const dryRun = Boolean(flags['dry-run']);
@@ -403,6 +427,9 @@ async function main(): Promise<void> {
     case 'apply':
       exitCode = await cmdApply(flags);
       break;
+    case 'reject':
+      exitCode = await cmdReject(flags);
+      break;
     case 'review':
       exitCode = await cmdReview(flags);
       break;
@@ -410,7 +437,7 @@ async function main(): Promise<void> {
       exitCode = await cmdStatus(flags);
       break;
     default:
-      console.error(`unknown command: "${command}"\nusage: seo <understand|discover|prioritize|propose|apply|review|status> [options]`);
+      console.error(`unknown command: "${command}"\nusage: seo <understand|discover|prioritize|propose|apply|reject|review|status> [options]`);
       exitCode = 1;
   }
   process.exitCode = exitCode;

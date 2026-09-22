@@ -78,7 +78,11 @@ npm run seo -- review --config config/seo.config.json \
   - `after.sufficientData === false` かつ最終(28日)checkpointの場合のみ
     `insufficient_data` を使う。`no_effect` と混同しない。
   - 確信が持てなければ `canConclude: true` でも `continue_observing` のままで
-    よい(次のtier、あるいは28日目まで待つ)。
+    よい(次のtier、あるいは28日目まで待つ)。**特に、対象ページ/クエリの
+    実トラフィックが低く`minimumImpressions`をぎりぎり満たしただけ(例:
+    母数が1桁impressions)の場合、`canConclude: true`は「母数がある」という
+    機械的判定に過ぎず、「結論付けてよい」という意味ではない。** そうした
+    checkpointでは`continue_observing`を選ぶのが通常の判断になる。
 
 ```bash
 npm run seo -- review --config config/seo.config.json \
