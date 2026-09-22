@@ -60,17 +60,26 @@ async function loadConfig(path: string): Promise<SeoConfig> {
 }
 
 /**
- * `understand`/`propose`/`review` always need a real config (unlike
- * discover/prioritize/apply/status/reject*, which tolerate no config via
- * `loadConfigIfProvided`). Fixture mode has a real default
- * (config/seo.config.example.json); non-fixture mode has no safe default
- * (config/seo.config.json has never existed in real usage — multi-site
- * configs are explicit files like config/seo.rakusetsu.config.json), so a
- * missing --config there is a clear usage error, not a fallback path.
+ * Every command that touches state needs a real config in real (non-fixture)
+ * mode. Fixture mode has a real default (config/seo.config.example.json,
+ * which has no site.key — fixture runs use a single fixed runtime dir and
+ * never consult site.key at all, see ensureFixtureRuntimeCopy); non-fixture
+ * mode has no safe default (config/seo.config.json has never existed in real
+ * usage, and silently falling back to the legacy unkeyed data/seo/ dir would
+ * let a real multi-site run land in the wrong site's state), so a missing
+ * --config, or a real config missing site.key, is a clear usage error, never
+ * a fallback path.
  */
 async function requireConfig(flags: Flags, fixtureMode: boolean, commandName: string): Promise<SeoConfig | null> {
   const configPath = flagString(flags, 'config');
-  if (configPath) return loadConfig(configPath);
+  if (configPath) {
+    const config = await loadConfig(configPath);
+    if (!fixtureMode && !config.site.key) {
+      console.error(`${commandName}: config.site.key is required outside --fixture mode (missing in ${configPath}) — a real run must not silently fall back to the legacy unkeyed data/seo/ state dir`);
+      return null;
+    }
+    return config;
+  }
   if (fixtureMode) return loadConfig('config/seo.config.example.json');
   console.error(`${commandName} requires --config <path> (e.g. config/seo.rakusetsu.config.json) outside --fixture mode`);
   return null;
@@ -94,17 +103,6 @@ function dataPathsFromDir(dataDir: string): DataPaths {
   };
 }
 
-/**
- * Loads config from `--config` when given. Commands that historically never
- * looked at config (discover/prioritize/apply/status) treat it as optional
- * so a bare invocation (no --config) keeps resolving the legacy data/seo/
- * state dir untouched — multi-site opt-in only kicks in once a config with
- * site.key is passed.
- */
-async function loadConfigIfProvided(flags: Flags): Promise<SeoConfig | null> {
-  const configPath = flagString(flags, 'config');
-  return configPath ? loadConfig(configPath) : null;
-}
 
 /**
  * `--fixture` runs must never mutate the checked-in fixtures/ directory. The
@@ -230,9 +228,10 @@ export async function cmdUnderstand(flags: Flags): Promise<number> {
 export async function cmdDiscover(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const dryRun = Boolean(flags['dry-run']);
-  const config = fixtureMode ? null : await loadConfigIfProvided(flags);
+  const config = await requireConfig(flags, fixtureMode, 'discover');
+  if (!config) return 1;
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config?.site.key);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config.site.key);
 
   if (flags['dump-inputs']) {
     const dumped = await dumpDiscoverInputs(paths);
@@ -249,15 +248,16 @@ export async function cmdDiscover(flags: Flags): Promise<number> {
   const now = new Date().toISOString();
 
   const result = await runDiscover(paths, input.opportunities, now, dryRun);
-  await writeReport(result.report, dryRun, config?.site.key);
+  await writeReport(result.report, dryRun, config.site.key);
   return 0;
 }
 
 export async function cmdPrioritize(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
-  const config = fixtureMode ? null : await loadConfigIfProvided(flags);
+  const config = await requireConfig(flags, fixtureMode, 'prioritize');
+  if (!config) return 1;
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config?.site.key);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config.site.key);
 
   const opportunities = await loadOpportunities(paths.opportunities);
   const experiments = await loadExperiments(paths.experiments);
@@ -308,8 +308,9 @@ export async function cmdPropose(flags: Flags): Promise<number> {
 export async function cmdApply(flags: Flags): Promise<number> {
   const dryRun = Boolean(flags['dry-run']);
   const today = flagString(flags, 'date') ?? todayString();
-  const config = await loadConfigIfProvided(flags);
-  const paths = resolveDataPaths(process.cwd(), false, config?.site.key);
+  const config = await requireConfig(flags, false, 'apply');
+  if (!config) return 1;
+  const paths = resolveDataPaths(process.cwd(), false, config.site.key);
 
   const experimentId = flagString(flags, 'experiment-id');
   const evidenceFile = flagString(flags, 'evidence-file');
@@ -327,14 +328,15 @@ export async function cmdApply(flags: Flags): Promise<number> {
     dryRun,
   });
 
-  await writeReport(result.report, dryRun || result.exitCode !== 0, config?.site.key);
+  await writeReport(result.report, dryRun || result.exitCode !== 0, config.site.key);
   return result.exitCode;
 }
 
 export async function cmdReject(flags: Flags): Promise<number> {
   const dryRun = Boolean(flags['dry-run']);
-  const config = await loadConfigIfProvided(flags);
-  const paths = resolveDataPaths(process.cwd(), false, config?.site.key);
+  const config = await requireConfig(flags, false, 'reject');
+  if (!config) return 1;
+  const paths = resolveDataPaths(process.cwd(), false, config.site.key);
 
   const experimentId = flagString(flags, 'experiment-id');
   const reason = flagString(flags, 'reason');
@@ -350,14 +352,15 @@ export async function cmdReject(flags: Flags): Promise<number> {
     dryRun,
   });
 
-  await writeReport(result.report, dryRun || result.exitCode !== 0, config?.site.key);
+  await writeReport(result.report, dryRun || result.exitCode !== 0, config.site.key);
   return result.exitCode;
 }
 
 export async function cmdRejectOpportunity(flags: Flags): Promise<number> {
   const dryRun = Boolean(flags['dry-run']);
-  const config = await loadConfigIfProvided(flags);
-  const paths = resolveDataPaths(process.cwd(), false, config?.site.key);
+  const config = await requireConfig(flags, false, 'reject-opportunity');
+  if (!config) return 1;
+  const paths = resolveDataPaths(process.cwd(), false, config.site.key);
 
   const opportunityId = flagString(flags, 'opportunity-id');
   const reason = flagString(flags, 'reason');
@@ -373,7 +376,7 @@ export async function cmdRejectOpportunity(flags: Flags): Promise<number> {
     dryRun,
   });
 
-  await writeReport(result.report, dryRun || result.exitCode !== 0, config?.site.key);
+  await writeReport(result.report, dryRun || result.exitCode !== 0, config.site.key);
   return result.exitCode;
 }
 
@@ -438,9 +441,10 @@ export async function cmdReview(flags: Flags): Promise<number> {
 export async function cmdStatus(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const today = flagString(flags, 'date') ?? todayString();
-  const config = fixtureMode ? null : await loadConfigIfProvided(flags);
+  const config = await requireConfig(flags, fixtureMode, 'status');
+  if (!config) return 1;
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config?.site.key);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config.site.key);
 
   const opportunities = await loadOpportunities(paths.opportunities);
   const experiments = await loadExperiments(paths.experiments);

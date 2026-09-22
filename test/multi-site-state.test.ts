@@ -99,7 +99,7 @@ async function captureLog<T>(fn: () => Promise<T>): Promise<{ result: T; output:
   }
 }
 
-test('multi-site: state path isolation — site.key routes to data/seo/<key>/, distinct from other sites and from the legacy no-key path', async () => {
+test('multi-site: state path isolation — site.key routes to data/seo/<key>/, distinct from other sites; real mode refuses to fall back to the legacy no-key path', async () => {
   await withWorkdir(async (dir) => {
     await saveOpportunities(join(dir, 'data/seo/site-a/opportunities.json'), [opportunity('A1')]);
     await saveOpportunities(join(dir, 'data/seo/site-b/opportunities.json'), [opportunity('B1'), opportunity('B2')]);
@@ -114,8 +114,19 @@ test('multi-site: state path isolation — site.key routes to data/seo/<key>/, d
     const { output: outB } = await captureLog(() => cmdStatus({ config: configB }));
     assert.match(outB, /openOpportunities: 2/);
 
-    const { output: outLegacy } = await captureLog(() => cmdStatus({}));
-    assert.match(outLegacy, /openOpportunities: 0/);
+    const originalError = console.error;
+    let stderr = '';
+    console.error = (msg?: unknown) => {
+      stderr += `${String(msg)}\n`;
+    };
+    let exitCode: number;
+    try {
+      exitCode = await cmdStatus({});
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(exitCode, 1, 'real mode without --config must error, never silently read the legacy unkeyed data/seo/ dir');
+    assert.match(stderr, /status requires --config/);
   });
 });
 

@@ -29,6 +29,7 @@ async function withFixtureFetch<T>(fn: () => Promise<T>): Promise<T> {
 async function writeConfig(dir: string, maxPages: number | undefined): Promise<string> {
   const configPath = join(dir, 'seo.config.json');
   const site: Record<string, unknown> = {
+    key: 'maxpages-test-site',
     baseUrl: 'http://fixture.test',
     mode: 'existing',
     reader: 'http',
