@@ -52,6 +52,14 @@ export class MaxActiveExperimentsError extends Error {
   }
 }
 
+export class QueryConflictError extends Error {
+  readonly code = 'ACTIVE_QUERY_EXPERIMENT_EXISTS';
+  constructor(message: string) {
+    super(message);
+    this.name = 'QueryConflictError';
+  }
+}
+
 export function isActiveExperimentStatus(status: ExperimentStatus): boolean {
   return (ACTIVE_EXPERIMENT_STATUSES as string[]).includes(status);
 }
@@ -82,6 +90,38 @@ export function assertNoActivePageConflict(
     if (conflicting.length > 0) {
       throw new PageConflictError(
         `page(s) already have an active Experiment (${e.id}): ${[...new Set(conflicting)].join(', ')}`,
+      );
+    }
+  }
+}
+
+/**
+ * Exact-string overlap on `measurementPlan.targetQueries` between the
+ * candidate and any active Experiment. Only runs when BOTH sides declare
+ * targetQueries — an Experiment with no targetQueries (page-level
+ * measurement) never participates in this guard. No normalization, no
+ * semantic/similar-keyword judgment (that stays a Skill-level "avoid an
+ * obviously-overlapping search intent" concern, not a core guard) — this is
+ * strictly an exact string match, so it complements rather than replaces
+ * assertNoActivePageConflict (which already blocks same-page Experiments
+ * regardless of query scope).
+ */
+export function assertNoActiveQueryConflict(
+  candidate: Pick<Experiment, 'measurementPlan'>,
+  experiments: Experiment[],
+): void {
+  const candidateQueries = candidate.measurementPlan.targetQueries;
+  if (!candidateQueries || candidateQueries.length === 0) return;
+  const candidateSet = new Set(candidateQueries);
+
+  for (const e of experiments) {
+    if (!isActiveExperimentStatus(e.status)) continue;
+    const existingQueries = e.measurementPlan.targetQueries;
+    if (!existingQueries || existingQueries.length === 0) continue;
+    const overlapping = existingQueries.filter((q) => candidateSet.has(q));
+    if (overlapping.length > 0) {
+      throw new QueryConflictError(
+        `query(ies) already have an active Experiment (${e.id}): ${[...new Set(overlapping)].join(', ')}`,
       );
     }
   }

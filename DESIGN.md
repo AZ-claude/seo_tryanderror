@@ -771,11 +771,13 @@ read-only。`{ experiment, elapsedDays, checkpoint, comparison: {before, after, 
 
 専用の統計的有意性エンジンやBayesian最適化は作らない（YAGNI）。coreが出すのは `before`/`after`/`delta`/`elapsedDays`/`sufficientData`/`metricDirection`（`position` のみlower-is-better）という構造化データのみで、「成功」を決める%閾値は一切発明しない。
 
-### 10.8 並行Experiment・page conflict guard（実装済み）
+### 10.8 並行Experiment・page/query conflict guard（実装済み）
 
 1つのExperimentのreviewを待ってサイト全体のPDCAを止めない。`config.experiment.maxActiveExperiments`（未指定時3）まで、複数のActiveなExperiment（`proposed`/`approved`/`applied`/`observing`）を並行させてよい。
 
 ただし**同じページに2つ以上のactiveなExperimentを同時に走らせると、効果がどちらの変更によるものか分からなくなる**。そのため `propose` 時、既存のOpportunity単位のactive experiment guard（[§7.3](#73-experimentsjson-のwrite-rule)）に加えて、`Action.targetPaths` / `MeasurementPlan.targetPages` のページscopeが既存のactiveなExperimentと重なっていないかを確認する（`assertNoActivePageConflict`、エラーコード `ACTIVE_PAGE_EXPERIMENT_EXISTS`）。別のOpportunityであっても、同じページを指していればブロックする。異なるページなら常に並行可能。V1ではcluster Opportunity同士のキーワード意味重複検出は行わない（scopeがpageと重ならなければ許可）。
+
+**query conflict guard（`assertNoActiveQueryConflict`、エラーコード `ACTIVE_QUERY_EXPERIMENT_EXISTS`）**: 同じqueryを狙う2つのExperimentが別ページで同時に走ると、page conflict guardをすり抜けてしまう（ページが異なるため）。そこで `measurementPlan.targetQueries` を**双方が指定している場合のみ**、exact string matchで1件でも重複していれば `propose` を拒否する。正規化・大文字小文字統一・空白除去・類似語判定等は一切行わない——`targetQueries` が片方でも未指定（page-level測定のExperiment）なら判定自体をスキップする。「意味的に近い検索意図を避ける」判断はcoreの責務ではなくSkillの責務のまま（`.claude/skills/seo-growth-loop/SKILL.md` に明記）。
 
 ---
 

@@ -5,8 +5,10 @@ import {
   MaxActiveExperimentsError,
   OpportunityNotOpenError,
   PageConflictError,
+  QueryConflictError,
   assertCanCreateExperiment,
   assertNoActivePageConflict,
+  assertNoActiveQueryConflict,
   assertUnderMaxActiveExperiments,
   buildExperiment,
 } from '../experiment.js';
@@ -63,12 +65,14 @@ export async function runPropose(paths: ProposePaths, options: ProposeOptions): 
         { action: options.input.action, measurementPlan: options.input.measurementPlan },
         experiments,
       );
+      assertNoActiveQueryConflict({ measurementPlan: options.input.measurementPlan }, experiments);
     } catch (err) {
       if (
         err instanceof ActiveExperimentGuardError ||
         err instanceof OpportunityNotOpenError ||
         err instanceof MaxActiveExperimentsError ||
-        err instanceof PageConflictError
+        err instanceof PageConflictError ||
+        err instanceof QueryConflictError
       ) {
         return {
           exitCode: 1,

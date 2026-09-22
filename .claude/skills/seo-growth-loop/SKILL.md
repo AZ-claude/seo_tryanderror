@@ -200,6 +200,14 @@ propose/apply結果、または「今日は変更なし」)を要約する。「
 - `maxActiveExperiments` を超えて新規Experimentを作らない(coreがguardする)。
 - 同一ページに複数のactiveなExperimentを作らない(`ACTIVE_PAGE_EXPERIMENT_EXISTS`
   としてcoreがguardする)。異なるページなら並行してよい。
+- `measurementPlan.targetQueries` が既存のactiveなExperimentと1件でも完全一致
+  するcandidateは作らない(`ACTIVE_QUERY_EXPERIMENT_EXISTS` としてcoreが
+  guardする)。これは**exact string match**のみで、`targetQueries` を片方でも
+  指定していなければ判定しない。「メガブレイブ 買取」と「メガブレイブ買取」の
+  ような類似語・意味が近いだけのqueryをcoreが検知することはない——**そうした
+  「同じ検索意図が明らかに重なる」候補を選ばないこと自体は、DISCOVER/PROPOSE
+  時にこのSkill(あなた)の責任で判断する。** coreの2つのguard(page/query)は
+  文字列一致の安全網であり、意味的な重複判断の代わりにはならない。
 - `insufficient_data` を `no_effect` にすり替えない。データ不足は
   データ不足として記録する。
 - checkpointは`review`の`--dump-inputs`が返す構造化データに基づいて判断する。
