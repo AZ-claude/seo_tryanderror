@@ -294,6 +294,10 @@ export interface GscAdapter {
     property: string;
     startDate: string;
     endDate: string;
+    /** Restrict rows to pages containing this substring (DESIGN.md multi-site GSC scoping). */
+    pagePrefix?: string;
+    /** Exclude rows for pages containing this substring (e.g. a subdomain that must not leak into the parent site's property). */
+    excludePagePrefix?: string;
   }): Promise<{ rows: GscSummaryRow[] }>;
 }
 
@@ -350,6 +354,14 @@ export interface ActionExecutor {
 export type SeoConfig = {
   schemaVersion: 2;
   site: {
+    /**
+     * Multi-site state namespace (DESIGN.md multi-site). When set, all state
+     * (site-understanding/opportunities/experiments/rank-history/lock) and
+     * reports for this config live under data/seo/<key>/ and reports/<key>/
+     * instead of the legacy data/seo/ and reports/ roots. Optional for
+     * backward compatibility with configs that never set it.
+     */
+    key?: string;
     baseUrl: string;
     mode: 'existing' | 'bootstrap';
     reader: 'http' | 'filesystem';
@@ -363,6 +375,10 @@ export type SeoConfig = {
     defaultWindowDays: number;
     reviewWindowDays: number;
     finalDataLagDays: number;
+    /** Restrict GSC rows to pages containing this substring (multi-site scoping, e.g. a subdomain's URL prefix). */
+    pagePrefix?: string;
+    /** Exclude GSC rows for pages containing this substring (e.g. a subdomain that must not leak into a domain-property fetch). */
+    excludePagePrefix?: string;
   };
   experiment: {
     cooldownDays: number;

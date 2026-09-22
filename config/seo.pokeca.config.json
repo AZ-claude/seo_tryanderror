@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "site": {
+    "key": "pokeca",
+    "baseUrl": "https://pokeca.rakusetsu.com/",
+    "mode": "existing",
+    "reader": "http",
+    "repoRoot": "/Users/eita/projects/pokeca-lottery2",
+    "contentRoot": null,
+    "maxPages": 2000
+  },
+  "gsc": {
+    "property": "sc-domain:rakusetsu.com",
+    "credentialsEnv": "GSC_SERVICE_ACCOUNT_JSON",
+    "defaultWindowDays": 28,
+    "reviewWindowDays": 7,
+    "finalDataLagDays": 3,
+    "pagePrefix": "https://pokeca.rakusetsu.com/"
+  },
+  "experiment": {
+    "cooldownDays": 7,
+    "maxActiveExperiments": 2
+  },
+  "commands": {
+    "build": null,
+    "test": null
+  },
+  "adapters": {
+    "writer": "stub",
+    "site": "http-readonly",
+    "search": "fixture"
+  }
+}

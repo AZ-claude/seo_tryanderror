@@ -97,6 +97,27 @@ export function mapQueryPageRows(rows: RawGscRow[]): GscSummaryRow[] {
   }));
 }
 
+export type PageDimensionFilterGroup = {
+  filters: Array<{ dimension: 'page'; operator: 'contains' | 'notContains'; expression: string }>;
+};
+
+/**
+ * Multi-site GSC scoping (DESIGN.md multi-site): builds Search Analytics API
+ * `dimensionFilterGroups` so a domain-level property (which spans
+ * subdomains) can be narrowed to one site's pages server-side, instead of
+ * fetching all rows and filtering client-side. Returns undefined when
+ * neither filter is requested (no filter group sent).
+ */
+export function buildPageDimensionFilters(input: {
+  pagePrefix?: string;
+  excludePagePrefix?: string;
+}): PageDimensionFilterGroup[] | undefined {
+  const filters: PageDimensionFilterGroup['filters'] = [];
+  if (input.pagePrefix) filters.push({ dimension: 'page', operator: 'contains', expression: input.pagePrefix });
+  if (input.excludePagePrefix) filters.push({ dimension: 'page', operator: 'notContains', expression: input.excludePagePrefix });
+  return filters.length > 0 ? [{ filters }] : undefined;
+}
+
 export class RealGscAdapter implements GscAdapter {
   constructor(private readonly credentialsEnv: string) {}
 
@@ -104,9 +125,13 @@ export class RealGscAdapter implements GscAdapter {
     property: string;
     startDate: string;
     endDate: string;
+    pagePrefix?: string;
+    excludePagePrefix?: string;
   }): ReturnType<GscAdapter['fetchQueryPageMatrix']> {
     const account = await loadServiceAccount(this.credentialsEnv);
     const accessToken = await getAccessToken(account);
+
+    const dimensionFilterGroups = buildPageDimensionFilters(input);
 
     const url = `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(
       input.property,
@@ -123,6 +148,7 @@ export class RealGscAdapter implements GscAdapter {
         dimensions: ['query', 'page'],
         rowLimit: 5000,
         dataState: 'final',
+        ...(dimensionFilterGroups ? { dimensionFilterGroups } : {}),
       }),
     });
     if (!res.ok) {

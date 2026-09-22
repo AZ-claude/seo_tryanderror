@@ -6,4 +6,4 @@ private/
 *service-account*.json
 reports/
 .tmp/
-data/seo/.run.lock
+data/

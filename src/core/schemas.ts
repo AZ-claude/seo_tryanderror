@@ -287,6 +287,7 @@ export const serpInspectionSchema = z.object({
 export const seoConfigSchema = z.object({
   schemaVersion: z.literal(2),
   site: z.object({
+    key: z.string().min(1).optional(),
     baseUrl: z.string().min(1),
     mode: z.enum(['existing', 'bootstrap']),
     reader: z.enum(['http', 'filesystem']),
@@ -300,6 +301,8 @@ export const seoConfigSchema = z.object({
     defaultWindowDays: z.number().positive(),
     reviewWindowDays: z.number().positive(),
     finalDataLagDays: z.number().nonnegative(),
+    pagePrefix: z.string().min(1).optional(),
+    excludePagePrefix: z.string().min(1).optional(),
   }),
   experiment: z.object({
     cooldownDays: z.number().positive(),

@@ -27,6 +27,8 @@ export type UnderstandOptions = {
   finalDataLagDays: number;
   gscSource: 'gsc' | 'fixture';
   existingExperiments?: Experiment[];
+  gscPagePrefix?: string;
+  gscExcludePagePrefix?: string;
 };
 
 export type UnderstandResult = {
@@ -83,6 +85,8 @@ export async function runUnderstand(
           property: options.gscProperty,
           startDate: window.start,
           endDate: window.end,
+          pagePrefix: options.gscPagePrefix,
+          excludePagePrefix: options.gscExcludePagePrefix,
         });
         const entry: RankHistoryEntry = {
           date: options.today,

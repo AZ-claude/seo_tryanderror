@@ -76,6 +76,18 @@ function dataPathsFromDir(dataDir: string): DataPaths {
 }
 
 /**
+ * Loads config from `--config` when given. Commands that historically never
+ * looked at config (discover/prioritize/apply/status) treat it as optional
+ * so a bare invocation (no --config) keeps resolving the legacy data/seo/
+ * state dir untouched — multi-site opt-in only kicks in once a config with
+ * site.key is passed.
+ */
+async function loadConfigIfProvided(flags: Flags): Promise<SeoConfig | null> {
+  const configPath = flagString(flags, 'config');
+  return configPath ? loadConfig(configPath) : null;
+}
+
+/**
  * `--fixture` runs must never mutate the checked-in fixtures/ directory. The
  * first fixture run seeds a gitignored working copy under .tmp/fixture-run/;
  * subsequent runs reuse it, so `understand -> discover -> prioritize ->
@@ -98,8 +110,9 @@ async function ensureFixtureRuntimeCopy(rootDir: string): Promise<{ dataDir: str
   return { dataDir };
 }
 
-function resolveDataPaths(rootDir: string, fixtureMode: boolean): DataPaths {
-  return dataPathsFromDir(join(rootDir, fixtureMode ? 'fixtures/data/seo' : 'data/seo'));
+function resolveDataPaths(rootDir: string, fixtureMode: boolean, siteKey?: string): DataPaths {
+  const base = fixtureMode ? 'fixtures/data/seo' : 'data/seo';
+  return dataPathsFromDir(join(rootDir, base, ...(fixtureMode || !siteKey ? [] : [siteKey])));
 }
 
 const fixturePageSchema = z.object({
@@ -143,10 +156,10 @@ function reportFileName(now = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.md`;
 }
 
-async function writeReport(report: string, dryRun: boolean): Promise<void> {
+async function writeReport(report: string, dryRun: boolean, siteKey?: string): Promise<void> {
   console.log(report);
   if (!dryRun) {
-    const dir = join(process.cwd(), 'reports');
+    const dir = siteKey ? join(process.cwd(), 'reports', siteKey) : join(process.cwd(), 'reports');
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, reportFileName()), report, 'utf8');
   }
@@ -160,7 +173,7 @@ export async function cmdUnderstand(flags: Flags): Promise<number> {
   const dryRun = Boolean(flags['dry-run']);
 
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config.site.key);
 
   const fixturePages = fixtureMode ? await loadFixturePages(process.cwd()) : [];
   const siteReader = buildSiteReader(config, { fixtureMode, fixturePages });
@@ -187,17 +200,20 @@ export async function cmdUnderstand(flags: Flags): Promise<number> {
     finalDataLagDays: config.gsc.finalDataLagDays,
     gscSource: fixtureMode ? 'fixture' : 'gsc',
     existingExperiments,
+    gscPagePrefix: config.gsc.pagePrefix,
+    gscExcludePagePrefix: config.gsc.excludePagePrefix,
   });
 
-  await writeReport(result.report, dryRun);
+  await writeReport(result.report, dryRun, config.site.key);
   return 0;
 }
 
 export async function cmdDiscover(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const dryRun = Boolean(flags['dry-run']);
+  const config = fixtureMode ? null : await loadConfigIfProvided(flags);
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config?.site.key);
 
   if (flags['dump-inputs']) {
     const dumped = await dumpDiscoverInputs(paths);
@@ -214,14 +230,15 @@ export async function cmdDiscover(flags: Flags): Promise<number> {
   const now = new Date().toISOString();
 
   const result = await runDiscover(paths, input.opportunities, now, dryRun);
-  await writeReport(result.report, dryRun);
+  await writeReport(result.report, dryRun, config?.site.key);
   return 0;
 }
 
 export async function cmdPrioritize(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
+  const config = fixtureMode ? null : await loadConfigIfProvided(flags);
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config?.site.key);
 
   const opportunities = await loadOpportunities(paths.opportunities);
   const experiments = await loadExperiments(paths.experiments);
@@ -240,7 +257,7 @@ export async function cmdPropose(flags: Flags): Promise<number> {
   const today = flagString(flags, 'date') ?? todayString();
 
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config.site.key);
 
   const opportunityId = flagString(flags, 'opportunity-id');
   const hypothesisFile = flagString(flags, 'hypothesis-file');
@@ -265,14 +282,15 @@ export async function cmdPropose(flags: Flags): Promise<number> {
     dryRun,
   });
 
-  await writeReport(result.report, dryRun || result.exitCode !== 0);
+  await writeReport(result.report, dryRun || result.exitCode !== 0, config.site.key);
   return result.exitCode;
 }
 
 export async function cmdApply(flags: Flags): Promise<number> {
   const dryRun = Boolean(flags['dry-run']);
   const today = flagString(flags, 'date') ?? todayString();
-  const paths = resolveDataPaths(process.cwd(), false);
+  const config = await loadConfigIfProvided(flags);
+  const paths = resolveDataPaths(process.cwd(), false, config?.site.key);
 
   const experimentId = flagString(flags, 'experiment-id');
   const evidenceFile = flagString(flags, 'evidence-file');
@@ -290,7 +308,7 @@ export async function cmdApply(flags: Flags): Promise<number> {
     dryRun,
   });
 
-  await writeReport(result.report, dryRun || result.exitCode !== 0);
+  await writeReport(result.report, dryRun || result.exitCode !== 0, config?.site.key);
   return result.exitCode;
 }
 
@@ -303,7 +321,7 @@ export async function cmdReview(flags: Flags): Promise<number> {
   const now = new Date().toISOString();
 
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config.site.key);
 
   const experimentId = flagString(flags, 'experiment-id');
   if (!experimentId) {
@@ -322,6 +340,8 @@ export async function cmdReview(flags: Flags): Promise<number> {
       today,
       finalDataLagDays: config.gsc.finalDataLagDays,
       now,
+      gscPagePrefix: config.gsc.pagePrefix,
+      gscExcludePagePrefix: config.gsc.excludePagePrefix,
     });
     console.log(JSON.stringify(dumped, null, 2));
     return 'error' in dumped ? 1 : 0;
@@ -342,17 +362,20 @@ export async function cmdReview(flags: Flags): Promise<number> {
     now,
     decisionInput,
     dryRun,
+    gscPagePrefix: config.gsc.pagePrefix,
+    gscExcludePagePrefix: config.gsc.excludePagePrefix,
   });
 
-  await writeReport(result.report, dryRun || result.exitCode !== 0);
+  await writeReport(result.report, dryRun || result.exitCode !== 0, config.site.key);
   return result.exitCode;
 }
 
 export async function cmdStatus(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const today = flagString(flags, 'date') ?? todayString();
+  const config = fixtureMode ? null : await loadConfigIfProvided(flags);
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
-  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false);
+  const paths = runtime ? dataPathsFromDir(runtime.dataDir) : resolveDataPaths(process.cwd(), false, config?.site.key);
 
   const opportunities = await loadOpportunities(paths.opportunities);
   const experiments = await loadExperiments(paths.experiments);

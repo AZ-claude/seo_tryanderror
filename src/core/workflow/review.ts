@@ -53,8 +53,15 @@ async function fetchWindowSnapshot(
   window: { start: string; end: string },
   measurementPlan: Pick<Experiment['measurementPlan'], 'targetPages' | 'targetQueries' | 'minimumImpressions'>,
   now: string,
+  gscScope?: { pagePrefix?: string; excludePagePrefix?: string },
 ): Promise<MetricsSnapshot> {
-  const { rows } = await gsc.fetchQueryPageMatrix({ property, startDate: window.start, endDate: window.end });
+  const { rows } = await gsc.fetchQueryPageMatrix({
+    property,
+    startDate: window.start,
+    endDate: window.end,
+    pagePrefix: gscScope?.pagePrefix,
+    excludePagePrefix: gscScope?.excludePagePrefix,
+  });
   const { impressions, clicks, ctr, position, sufficientData } = aggregateGscRows(rows, measurementPlan);
   return {
     at: now,
@@ -82,7 +89,15 @@ function experimentSummary(experiment: Experiment): ReviewDumpResult['experiment
 export async function dumpReviewInputs(
   experiments: Experiment[],
   gsc: GscAdapter,
-  options: { experimentId: string; property: string; today: string; finalDataLagDays: number; now: string },
+  options: {
+    experimentId: string;
+    property: string;
+    today: string;
+    finalDataLagDays: number;
+    now: string;
+    gscPagePrefix?: string;
+    gscExcludePagePrefix?: string;
+  },
 ): Promise<ReviewDumpResult | { error: string }> {
   const experiment = experiments.find((e) => e.id === options.experimentId);
   if (!experiment) return { error: `no Experiment found with id ${options.experimentId}` };
@@ -112,12 +127,14 @@ export async function dumpReviewInputs(
     };
   }
 
+  const gscScope = { pagePrefix: options.gscPagePrefix, excludePagePrefix: options.gscExcludePagePrefix };
   const before = await fetchWindowSnapshot(
     gsc,
     options.property,
     { start: due.comparisonWindow.beforeStart, end: due.comparisonWindow.beforeEnd },
     experiment.measurementPlan,
     options.now,
+    gscScope,
   );
   const after = await fetchWindowSnapshot(
     gsc,
@@ -125,6 +142,7 @@ export async function dumpReviewInputs(
     { start: due.comparisonWindow.afterStart, end: due.comparisonWindow.afterEnd },
     experiment.measurementPlan,
     options.now,
+    gscScope,
   );
   const decision = decideCheckpoint(after, due.checkpointDay);
 
@@ -148,6 +166,8 @@ export type ReviewDecisionOptions = {
   now: string;
   decisionInput: ReviewDecisionInput;
   dryRun: boolean;
+  gscPagePrefix?: string;
+  gscExcludePagePrefix?: string;
 };
 
 export type ReviewDecisionResult = {
