@@ -151,6 +151,44 @@ PASSを経てからでないとmerge/deployしない(`seo-growth-loop`の該当�
 ——このtier判定はC本体にハードコードせず、対象repoの`AGENTS.md`を都度読んで
 判断する。
 
+### Scheduler(mechanical-only、Option A)
+
+`scripts/scheduled-mechanical-check.sh` は、`config/*.config.json`(`site.key`を
+持つ実configすべて、exampleは除く)ごとに `understand`(実サイト再クロール+GSC
+更新)と、`observing`中の各Experimentに対する `review --dump-inputs`
+(**read-only、状態は一切変更しない**)だけを行い、checkpointが到来していたら
+ログに明記する薄いラッパー。
+
+**`discover`/`prioritize`/`propose`/`apply`/`reject`/`reject-opportunity`は
+一切呼ばない。checkpointが到来していても `review --review-file` で
+conclude/continue_observingを自動選択したりしない。** 意味判断が要る部分は
+すべて、人間が `seo-growth-loop`/`seo-multi-site-loop` を手動起動するまで
+行われない。無人実行が安全に完結するのはこの「機械的な部分」だけ、という
+前提を変えない限りスコープを広げない。
+
+導入手順:
+
+```bash
+chmod +x scripts/scheduled-mechanical-check.sh
+GSC_SERVICE_ACCOUNT_JSON=/path/to/key.json scripts/scheduled-mechanical-check.sh  # 手動で一度試す
+```
+
+launchdへ登録する場合、`scripts/launchd/com.seo-tryanderror.mechanical-check.plist`
+をテンプレートとして使う(`REPO_PATH`/`GSC_SERVICE_ACCOUNT_JSON_PATH`を実際の
+絶対パスに置き換えてから):
+
+```bash
+cp scripts/launchd/com.seo-tryanderror.mechanical-check.plist \
+   ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
+# REPO_PATH / GSC_SERVICE_ACCOUNT_JSON_PATH を編集してから:
+launchctl load ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
+
+# 停止する場合:
+launchctl unload ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
+```
+
+ログは `logs/scheduled/`(gitignore済み、コミットしない)に日次で残る。
+
 ## GSC setup
 
 1. Google Cloud プロジェクトを作成

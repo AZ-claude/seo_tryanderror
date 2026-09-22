@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template only — not installed automatically. See README.md "Scheduler
+  (mechanical-only)" for install/uninstall instructions.
+
+  Runs scripts/scheduled-mechanical-check.sh (understand + review
+  --dump-inputs for every real site config) once a day. Does not run
+  discover/prioritize/propose/apply — those stay manually triggered.
+
+  Before installing, replace:
+    - REPO_PATH: absolute path to this checked-out repo
+    - GSC_SERVICE_ACCOUNT_JSON_PATH: absolute path to the GSC service
+      account JSON (never commit the real value anywhere else)
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.seo-tryanderror.mechanical-check</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>REPO_PATH/scripts/scheduled-mechanical-check.sh</string>
+	</array>
+
+	<key>WorkingDirectory</key>
+	<string>REPO_PATH</string>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>GSC_SERVICE_ACCOUNT_JSON</key>
+		<string>GSC_SERVICE_ACCOUNT_JSON_PATH</string>
+		<key>PATH</key>
+		<string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+	</dict>
+
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>9</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+
+	<key>StandardOutPath</key>
+	<string>REPO_PATH/logs/scheduled/launchd.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>REPO_PATH/logs/scheduled/launchd.err.log</string>
+
+	<key>RunAtLoad</key>
+	<false/>
+</dict>
+</plist>
