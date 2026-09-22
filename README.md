@@ -173,19 +173,38 @@ chmod +x scripts/scheduled-mechanical-check.sh
 GSC_SERVICE_ACCOUNT_JSON=/path/to/key.json scripts/scheduled-mechanical-check.sh  # 手動で一度試す
 ```
 
-launchdへ登録する場合、`scripts/launchd/com.seo-tryanderror.mechanical-check.plist`
-をテンプレートとして使う(`REPO_PATH`/`GSC_SERVICE_ACCOUNT_JSON_PATH`を実際の
-絶対パスに置き換えてから):
+**launchdへ実際に登録する前に、必ず `scripts/launchd/install.sh` を実行する。**
+launchdは対象scriptの起動より前に`StandardOutPath`/`StandardErrorPath`をopenする
+ため、`logs/scheduled/`が事前に存在しないとfresh installでjobが起動できない
+ことがある(scriptが自分でmkdirするのでは遅い)。このhelperはmkdirと、
+plistが使うPATHの下で実際に`node`/`npm`が解決できるかの確認だけを行い、
+**launchctlは一切呼ばない**(installはしない):
 
 ```bash
+scripts/launchd/install.sh
+```
+
+次に、`scripts/launchd/com.seo-tryanderror.mechanical-check.plist` を
+テンプレートとして使う(`REPO_PATH`/`HOME_PATH`/`GSC_SERVICE_ACCOUNT_JSON_PATH`
+を実際の絶対パスに置き換えてから)。このMacではnode/npmは`mise`管理で、
+標準的な`/opt/homebrew/bin`等のPATHには乗っていない
+(`~/.local/share/mise/shims`が必要。plistのPATHは既にこれを含む形に
+なっているが、別マシンに持っていく場合は`command -v node`/`command -v npm`
+で必ず確認する。`.zshrc`等のshell initをsourceする設計にはしない):
+
+```bash
+mkdir -p ~/Library/LaunchAgents
 cp scripts/launchd/com.seo-tryanderror.mechanical-check.plist \
    ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
-# REPO_PATH / GSC_SERVICE_ACCOUNT_JSON_PATH を編集してから:
-launchctl load ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
+# REPO_PATH / HOME_PATH / GSC_SERVICE_ACCOUNT_JSON_PATH を編集してから:
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
+launchctl kickstart -k gui/$(id -u)/com.seo-tryanderror.mechanical-check
 
 # 停止する場合:
-launchctl unload ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.seo-tryanderror.mechanical-check.plist
 ```
+
+(`launchctl load`/`unload`は非推奨。`bootstrap`/`bootout`を使う。)
 
 ログは `logs/scheduled/`(gitignore済み、コミットしない)に日次で残る。
 
