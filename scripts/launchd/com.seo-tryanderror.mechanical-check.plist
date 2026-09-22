@@ -12,6 +12,15 @@
     - REPO_PATH: absolute path to this checked-out repo
     - GSC_SERVICE_ACCOUNT_JSON_PATH: absolute path to the GSC service
       account JSON (never commit the real value anywhere else)
+    - HOME_PATH: absolute path to the installing user's home directory
+      (e.g. /Users/yourname) — needed because on this machine node/npm are
+      managed by mise and only resolve via its shim directory
+      ($HOME/.local/share/mise/shims), which is NOT on the default
+      /usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin PATH launchd jobs get.
+      Verify with `command -v node`/`command -v npm` under whatever PATH
+      you actually configure here before installing — do NOT source a
+      shell init file (.zshrc/.bashrc/mise activate) to solve this, a
+      LaunchAgent has no interactive shell to source it in.
 -->
 <plist version="1.0">
 <dict>
@@ -32,7 +41,7 @@
 		<key>GSC_SERVICE_ACCOUNT_JSON</key>
 		<string>GSC_SERVICE_ACCOUNT_JSON_PATH</string>
 		<key>PATH</key>
-		<string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+		<string>HOME_PATH/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
 	</dict>
 
 	<key>StartCalendarInterval</key>
