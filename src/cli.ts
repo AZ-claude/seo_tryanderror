@@ -59,6 +59,23 @@ async function loadConfig(path: string): Promise<SeoConfig> {
   return readJsonFile(path, seoConfigSchema);
 }
 
+/**
+ * `understand`/`propose`/`review` always need a real config (unlike
+ * discover/prioritize/apply/status/reject*, which tolerate no config via
+ * `loadConfigIfProvided`). Fixture mode has a real default
+ * (config/seo.config.example.json); non-fixture mode has no safe default
+ * (config/seo.config.json has never existed in real usage — multi-site
+ * configs are explicit files like config/seo.rakusetsu.config.json), so a
+ * missing --config there is a clear usage error, not a fallback path.
+ */
+async function requireConfig(flags: Flags, fixtureMode: boolean, commandName: string): Promise<SeoConfig | null> {
+  const configPath = flagString(flags, 'config');
+  if (configPath) return loadConfig(configPath);
+  if (fixtureMode) return loadConfig('config/seo.config.example.json');
+  console.error(`${commandName} requires --config <path> (e.g. config/seo.rakusetsu.config.json) outside --fixture mode`);
+  return null;
+}
+
 type DataPaths = {
   siteUnderstanding: string;
   opportunities: string;
@@ -169,8 +186,8 @@ async function writeReport(report: string, dryRun: boolean, siteKey?: string): P
 
 export async function cmdUnderstand(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
-  const configPath = flagString(flags, 'config') ?? (fixtureMode ? 'config/seo.config.example.json' : 'config/seo.config.json');
-  const config = await loadConfig(configPath);
+  const config = await requireConfig(flags, fixtureMode, 'understand');
+  if (!config) return 1;
   const today = flagString(flags, 'date') ?? todayString();
   const dryRun = Boolean(flags['dry-run']);
 
@@ -254,8 +271,8 @@ export async function cmdPrioritize(flags: Flags): Promise<number> {
 export async function cmdPropose(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const dryRun = Boolean(flags['dry-run']);
-  const configPath = flagString(flags, 'config') ?? (fixtureMode ? 'config/seo.config.example.json' : 'config/seo.config.json');
-  const config = await loadConfig(configPath);
+  const config = await requireConfig(flags, fixtureMode, 'propose');
+  if (!config) return 1;
   const today = flagString(flags, 'date') ?? todayString();
 
   const runtime = fixtureMode ? await ensureFixtureRuntimeCopy(process.cwd()) : null;
@@ -363,8 +380,8 @@ export async function cmdRejectOpportunity(flags: Flags): Promise<number> {
 export async function cmdReview(flags: Flags): Promise<number> {
   const fixtureMode = Boolean(flags.fixture);
   const dryRun = Boolean(flags['dry-run']);
-  const configPath = flagString(flags, 'config') ?? (fixtureMode ? 'config/seo.config.example.json' : 'config/seo.config.json');
-  const config = await loadConfig(configPath);
+  const config = await requireConfig(flags, fixtureMode, 'review');
+  if (!config) return 1;
   const today = flagString(flags, 'date') ?? todayString();
   const now = new Date().toISOString();
 
