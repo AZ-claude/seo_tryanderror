@@ -61,3 +61,25 @@ test('README: documents the three multi-site invocation patterns (single site x2
   assert.match(readme, /両サイトのPDCA回して/);
   assert.match(readme, /seo-multi-site-loop/);
 });
+
+test('README: no stale "missing --config falls back to legacy data/seo/" wording remains', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /後方互換のためのレガシー動作/);
+  assert.match(readme, /real\s*\(non-fixture\)モードでは、状態を扱う全コマンド/);
+  assert.match(readme, /legacyな `data\/seo\/` への暗黙fallbackは存在しない/);
+});
+
+test('README: state file table and RUN_ALREADY_ACTIVE both use the namespaced data/seo/<site.key>/ paths, not the old flat paths', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert.match(readme, /data\/seo\/<site\.key>\/site-understanding\.json/);
+  assert.match(readme, /data\/seo\/<site\.key>\/opportunities\.json/);
+  assert.match(readme, /data\/seo\/<site\.key>\/experiments\.json/);
+  assert.match(readme, /data\/seo\/<site\.key>\/rank-history\.json/);
+  assert.match(readme, /data\/seo\/<site\.key>\/\.run\.lock/);
+  assert.match(readme, /reports\/<site\.key>\//);
+  assert.doesNotMatch(readme, /`data\/seo\/site-understanding\.json`/);
+  assert.doesNotMatch(readme, /`data\/seo\/opportunities\.json`/);
+  assert.doesNotMatch(readme, /`data\/seo\/experiments\.json`/);
+  assert.doesNotMatch(readme, /`data\/seo\/rank-history\.json`/);
+  assert.doesNotMatch(readme, /`data\/seo\/\.run\.lock`/);
+});

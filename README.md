@@ -115,12 +115,18 @@ Opportunity候補を作る前の材料集めに使う。
 
 1. サイトごとに `config/seo.config.example.json` をコピーした専用config
    ファイル(例: `config/seo.rakusetsu.config.json` / `config/seo.pokeca.config.json`)
-   を用意し、`site.key`(state namespace)・`site.baseUrl` / `site.mode` /
-   `site.reader` / `gsc.property`(必要なら `gsc.pagePrefix`/
-   `gsc.excludePagePrefix`)を実サイトの値に書き換える。固定パス
-   `config/seo.config.json` を実運用で使うことは想定していない
-   (`--config` を省略した場合の挙動は後方互換のためのレガシー動作であり、
-   複数サイト運用の入口ではない)。
+   を用意し、`site.key`(state namespace、**必須**)・`site.baseUrl` /
+   `site.mode` / `site.reader` / `gsc.property`(必要なら `gsc.pagePrefix`/
+   `gsc.excludePagePrefix`)を実サイトの値に書き換える。**real
+   (non-fixture)モードでは、状態を扱う全コマンド
+   (`understand`/`discover`/`prioritize`/`propose`/`apply`/`review`/
+   `status`/`reject`/`reject-opportunity`)が `--config <path>` を必須とし、
+   かつそのconfigは `site.key` を持たなければならない。** `--config` 省略、
+   または `site.key` の無いconfigは exit 1 の明確なusage errorになる
+   ——legacyな `data/seo/` への暗黙fallbackは存在しない(誤って別サイトの
+   stateを読み書きする事故を防ぐため)。`--fixture` モードのみ、
+   `config/seo.config.example.json`(`site.key`無し)がデフォルトとして
+   使われる。
 2. `understand -> discover -> prioritize -> propose` までは
    `.claude/skills/seo-rank-watch/SKILL.md`、毎日のrolling PDCA
    (review/conclude/learn、新規apply)は `.claude/skills/seo-growth-loop/SKILL.md`
@@ -208,6 +214,12 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.seo-tryanderror.mechan
 
 ログは `logs/scheduled/`(gitignore済み、コミットしない)に日次で残る。
 
+`StartCalendarInterval` は毎日09:00 JST。これはmacOSのLaunchAgentなので、
+その時刻にMacがスリープ中/シャットダウン中/未ログインだった場合は実行
+されない(次回起動・ログイン時に自動で追いつくcatch-up機構は無い)。
+取りこぼした日はログに何も残らないだけで、次の09:00に通常どおり動く。
+これ以上の再試行・catch-up frameworkは今のところ作らない(YAGNI)。
+
 ## GSC setup
 
 1. Google Cloud プロジェクトを作成
@@ -242,14 +254,17 @@ Skill/人間の役割のままで、このリポジトリのコード自体は�
 
 ## 状態ファイルの意味
 
+サイトごとに `data/seo/<site.key>/` 配下へ完全に分離される
+(例: `data/seo/rakusetsu-main/`、`data/seo/pokeca/`)。
+
 | ファイル | 役割 |
 | --- | --- |
-| `data/seo/site-understanding.json` | 直近の `understand` 実行結果(都度上書き) |
-| `data/seo/opportunities.json` | Opportunity一覧。`history[]` は追記専用 |
-| `data/seo/experiments.json` | Experiment(Opportunity×Hypothesis×Action×MeasurementPlanの試行記録)。`history[]` は追記専用 |
-| `data/seo/rank-history.json` | GSC等の計測生ログ。**追記専用**、過去entryは変更・削除しない |
-| `data/seo/.run.lock` | 二重実行防止のロック(`.gitignore`済み) |
-| `reports/` | 各コマンド実行のMarkdownレポート(`.gitignore`済み) |
+| `data/seo/<site.key>/site-understanding.json` | 直近の `understand` 実行結果(都度上書き。`themes`/`proprietaryDataNotes`は`--understanding-file`省略時、既存値を保持する) |
+| `data/seo/<site.key>/opportunities.json` | Opportunity一覧。`history[]` は追記専用 |
+| `data/seo/<site.key>/experiments.json` | Experiment(Opportunity×Hypothesis×Action×MeasurementPlanの試行記録)。`history[]` は追記専用 |
+| `data/seo/<site.key>/rank-history.json` | GSC等の計測生ログ。**追記専用**、過去entryは変更・削除しない |
+| `data/seo/<site.key>/.run.lock` | 二重実行防止のロック(`.gitignore`済み)。サイトごとに別ロックのため、あるサイトの実行が別サイトをブロックしない |
+| `reports/<site.key>/` | 各コマンド実行のMarkdownレポート(`.gitignore`済み) |
 
 ## Guardrails
 
@@ -282,7 +297,9 @@ Skill/人間の役割のままで、このリポジトリのコード自体は�
 
 - **`RUN_ALREADY_ACTIVE`**: 別プロセスが実行中、または前回異常終了した
   ロックが残っている。10分以上古いロックは自動的に無効化されるので、
-  それ未満であれば少し待つ。手動で消す場合は `data/seo/.run.lock` を削除する。
+  それ未満であれば少し待つ。手動で消す場合は
+  `data/seo/<site.key>/.run.lock` を削除する(該当サイトの`site.key`が
+  対象。他サイトのロックには影響しない)。
 - **`GSC_NOT_CONFIGURED`**: 上記「GSC setup」を参照。`understand` は失敗せず
   続行する。
 - **`propose` が exit 1 (`ACTIVE_EXPERIMENT_EXISTS` / `OPPORTUNITY_NOT_OPEN`)**:
