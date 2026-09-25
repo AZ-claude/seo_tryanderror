@@ -214,6 +214,28 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.seo-tryanderror.mechan
 
 ログは `logs/scheduled/`(gitignore済み、コミットしない)に日次で残る。
 
+### 状態確認
+
+```bash
+npm run scheduler:status
+```
+
+前回実行の結果を人が読める形で表示する。意味:
+
+- **OK**: 何も対応不要。
+- **ATTENTION**: checkpointが到来(due)している。手動で
+  `seo-growth-loop`(1サイト)または `seo-multi-site-loop`(両サイト)を
+  起動してレビューする。
+- **ERROR**: schedulerまたはGSC/site取得で問題が発生。該当siteの
+  `logs/scheduled/YYYY-MM-DD-HHMMSS.log` を確認する。
+
+毎回の実行結果は機械可読な `logs/scheduled/latest-status.json`
+(gitignore済み、secret/GSCクエリ全文は含まない)にも残る。
+
+**通知はDUE/ERROR時のみ**(macOS通知、`osascript`経由)。正常時は通知しない。
+通知そのものが失敗しても(headless環境など)scheduler本体の成否には影響しない
+(ログにwarningが残るだけ)。
+
 `StartCalendarInterval` は毎日09:00 JST。これはmacOSのLaunchAgentなので、
 その時刻にMacがスリープ中/シャットダウン中/未ログインだった場合は実行
 されない(次回起動・ログイン時に自動で追いつくcatch-up機構は無い)。

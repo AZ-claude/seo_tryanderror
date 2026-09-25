@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "node --import tsx --test test/**/*.test.ts",
     "seo": "tsx src/cli.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "scheduler:status": "bash scripts/scheduler-status.sh"
   },
   "dependencies": {
     "zod": "^3.23.8"
